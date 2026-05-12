@@ -1,0 +1,163 @@
+//! Runtime state — `Core` (the single mutable cell every callback
+//! threads through), the `CoreCell`/`PendingCell` aliases that
+//! wrap it in an `Rc<RefCell<…>>`, the achievement-toast diff in
+//! `ingest_inventory`, and the localStorage flag for the first-
+//! visit onboarding wizard.
+
+use std::cell::RefCell;
+use std::collections::BTreeMap;
+use std::rc::Rc;
+
+use freenet_stdlib::prelude::{ContractKey, DelegateKey};
+use shared::{Inventory, PresencePayload, PubKey};
+
+use crate::delegate_client::{Pending, WsCell};
+
+use super::prefs::UserPrefs;
+use super::types::{Tab, Toast, MAX_TOASTS};
+use super::util::now_ms;
+
+pub type CoreCell = Rc<RefCell<Option<Core>>>;
+pub type PendingCell = Rc<RefCell<Pending>>;
+
+pub struct Core {
+    /// Filled once the delegate's `GetPubkey` response arrives.
+    pub pubkey: Option<PubKey>,
+    pub name: String,
+    /// Authoritative inventory — copied from the delegate on
+    /// `LoadInventory` / `RunMission` responses. The webapp never
+    /// mutates this directly except through delegate calls.
+    pub inventory: Inventory,
+    /// The inventory snapshot that's already been broadcast to the
+    /// presence contract. Used to decide whether the next heartbeat
+    /// has anything new to say.
+    pub last_published: Inventory,
+    pub last_published_ms: Option<u64>,
+    /// True while a `RunMission` is in flight — used to disable the
+    /// button and prevent overlapping calls in auto-mode.
+    pub mission_in_flight: bool,
+    // The persistent auto-run flag now lives in `inventory.auto_run_enabled`
+    // — single source of truth, delegate-authoritative, survives reloads.
+    // Click handlers mutate it optimistically and reconcile via the
+    // SetAutoRun response.
+    pub others: BTreeMap<PubKey, (PresencePayload, u64)>,
+    /// Persistent World Boss ledger as published by the contract.
+    /// Per-pubkey high-watermark of cumulative `boss_damage`; survives
+    /// presence-entry pruning so the boss aggregate cannot regress
+    /// when contributors go idle. Repopulated on every full-state
+    /// frame from the contract.
+    pub cumulative_damage: BTreeMap<PubKey, u64>,
+    pub ws: Option<WsCell>,
+    /// Both keys are resolved from `dev-keys.json` (if present)
+    /// during `connect_inner` and cached here. Heartbeats use them
+    /// directly so we don't re-parse on every tick.
+    pub contract_key: ContractKey,
+    pub delegate_key: DelegateKey,
+    pub status: String,
+    /// Currently-visible section. UI-only state; the delegate has
+    /// no notion of tabs.
+    pub current_tab: Tab,
+    /// Active visual theme id (one of `THEMES`). Persisted in
+    /// localStorage; mirrored on `<html data-theme="…">`. UI-only.
+    pub current_theme: String,
+    /// User-facing tuning knobs. Persisted as one JSON blob in
+    /// localStorage; pulled in on init, written through on every
+    /// edit. Drives cadence + behavioral toggles for the unified
+    /// polling tick below.
+    pub prefs: UserPrefs,
+    /// Bookkeeping for the unified polling tick — last wall-clock at
+    /// which we fired each periodic action. Compared against the
+    /// matching cadence from `prefs` to gate the next fire.
+    pub last_auto_tick_ms: u64,
+    pub last_heartbeat_tick_ms: u64,
+    pub last_pull_tick_ms: u64,
+    /// Holds the most recent `ExportSeed` reveal so the Settings
+    /// panel can show it. `None` = nothing revealed; `Some(hex)` =
+    /// raw 32-byte seed encoded as hex. **Never persisted** — lives
+    /// in RAM only, cleared on tab close and on manual "Hide".
+    pub exported_seed_hex: Option<String>,
+    /// Parsed mailbox contract key — `None` if not configured (empty
+    /// constants AND no `dev-keys.json` override). When `Some`, the
+    /// frontend subscribes on connect and maintains a local mirror
+    /// of messages addressed to `pubkey`.
+    pub mailbox_key: Option<ContractKey>,
+    /// Local mirror of mailbox messages addressed to *this* player.
+    /// Populated from contract `GetResponse` / `UpdateNotification`.
+    /// Filtered by `to == c.pubkey` at merge time so we don't store
+    /// other players' mail.
+    pub mailbox: Vec<shared::MessagePayload>,
+    /// Parsed guilds contract key (optional, same shape as mailbox).
+    pub guilds_key: Option<ContractKey>,
+    /// Local mirror of the guilds-contract state.
+    pub guilds: shared::GuildsState,
+    /// Draft text in the "create guild" input on the Guilds tab.
+    /// UI-only — never persisted. Cleared after a successful CREATE.
+    pub new_guild_name_input: String,
+    /// Achievement-unlock toast queue. Each entry holds its
+    /// creation timestamp; render filters by age, the unified
+    /// tick prunes expired ones.
+    pub toasts: Vec<Toast>,
+    /// Achievement ids we've already shown a toast for in this
+    /// session. `None` until the first inventory load — the
+    /// initial load establishes the baseline silently (no flood
+    /// of "you unlocked X 200 missions ago" toasts on reconnect).
+    pub shown_achievements: Option<std::collections::BTreeSet<u8>>,
+    /// Current step of the first-visit onboarding wizard. `None`
+    /// = dismissed (or never shown). `Some(0..ONBOARDING_STEPS)`
+    /// shows that step's modal. Persisted-as-dismissed via
+    /// localStorage key `freenet-idle-onboarded`.
+    pub onboarding_step: Option<u8>,
+}
+
+/// Apply a fresh `Inventory` from the delegate into `Core`,
+/// surfacing any newly-unlocked achievements as toasts. The first
+/// invocation in a session establishes the baseline silently —
+/// existing achievements are noted as "seen", no toasts fire.
+/// Subsequent calls diff the new set against `shown_achievements`
+/// and push one toast per genuinely new id.
+pub fn ingest_inventory(c: &mut Core, inv: Inventory) {
+    let now = now_ms();
+    let current: std::collections::BTreeSet<u8> =
+        inv.achievement_unlocks.keys().copied().collect();
+    match c.shown_achievements.as_mut() {
+        None => {
+            c.shown_achievements = Some(current);
+        }
+        Some(seen) => {
+            let new_ids: Vec<u8> = current.difference(seen).copied().collect();
+            for id in new_ids {
+                if c.toasts.len() >= MAX_TOASTS {
+                    c.toasts.remove(0);
+                }
+                c.toasts.push(Toast {
+                    label: format!("🏆 {}", shared::achievement_label(id)),
+                    body: shared::achievement_reason(id),
+                    created_ms: now,
+                });
+                seen.insert(id);
+            }
+        }
+    }
+    c.inventory = inv;
+}
+
+/// How many steps in the first-visit wizard.
+pub const ONBOARDING_STEPS: u8 = 4;
+const ONBOARDING_STORAGE_KEY: &str = "freenet-idle-onboarded";
+
+/// True if the user has previously dismissed the onboarding wizard
+/// (or completed it). Falls back to "show wizard" if storage is
+/// unreachable — a fresh viewer is a more useful default than a
+/// silently-skipped intro.
+pub fn onboarding_dismissed() -> bool {
+    let Some(window) = web_sys::window() else { return false };
+    let Ok(Some(storage)) = window.local_storage() else { return false };
+    matches!(storage.get_item(ONBOARDING_STORAGE_KEY), Ok(Some(v)) if v == "1")
+}
+
+pub fn dismiss_onboarding() {
+    let Some(window) = web_sys::window() else { return };
+    if let Ok(Some(storage)) = window.local_storage() {
+        let _ = storage.set_item(ONBOARDING_STORAGE_KEY, "1");
+    }
+}

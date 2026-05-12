@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Freenet Idle PoC</title>
+    <!-- Restore the saved theme BEFORE any rendering happens, otherwise
+         the page paints with the parchment default for the few hundred
+         ms it takes WASM to boot — visible flash on dusk/forest. The
+         allowlist mirrors `THEMES` in src/main.rs; anything outside it
+         falls through to the CSS default. -->
+    <script>
+    (function () {
+        try {
+            var t = localStorage.getItem('freenet-idle-theme');
+            if (t === 'parchment' || t === 'dusk' || t === 'forest') {
+                document.documentElement.setAttribute('data-theme', t);
+            }
+        } catch (e) { /* localStorage may be blocked — fall through */ }
+    })();
+    </script>
+    <link data-trunk rel="rust" data-bin="frontend" data-wasm-opt="z" />
+    <link data-trunk rel="css" href="style.css" />
+    <!-- Written by scripts/dev-publish.sh; the frontend fetches it at
+         runtime so the page picks up new contract / delegate IDs
+         without a Rust rebuild. -->
+    <link data-trunk rel="copy-file" href="dev-keys.json" />
+</head>
+<body></body>
+</html>

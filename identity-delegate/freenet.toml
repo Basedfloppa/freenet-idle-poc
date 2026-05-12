@@ -1,0 +1,3 @@
+[contract]
+type = "delegate"
+lang = "rust"
