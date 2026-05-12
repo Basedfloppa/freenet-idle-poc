@@ -2,7 +2,14 @@
 target = "index.html"
 dist = "dist"
 no_sri = true
-public_url = "/"
+# Relative public_url so assets resolve from the iframe's document URL.
+# The Freenet gateway serves the webapp at `/v1/contract/web/<id>/`,
+# but the sandbox-iframe sees its document origin as "null", and
+# absolute `/foo.js` paths then resolve against the gateway origin
+# (which doesn't have those paths) and CORS-fail. With "./" trunk
+# emits `./frontend-*.js` etc., which the iframe resolves relative
+# to its own document URL — same gateway, no CORS hop.
+public_url = "./"
 
 [serve]
 address = "127.0.0.1"

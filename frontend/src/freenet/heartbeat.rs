@@ -21,6 +21,10 @@ pub fn heartbeat_once(core: CoreCell, pending: PendingCell, bump: UseStateSetter
     // We no longer pre-build the payload on the webapp side — the
     // delegate is authoritative. Pull only the fields the player
     // owns (`name`) plus the WS handles and contract key.
+    //
+    // No contract key = single-player mode = nothing to publish.
+    // The delegate still tracks our inventory locally, but no
+    // aggregator contract is listening.
     let (ws, name, delegate_key, contract_key) = {
         let g = core.borrow();
         let Some(c) = g.as_ref() else { return };
@@ -28,11 +32,12 @@ pub fn heartbeat_once(core: CoreCell, pending: PendingCell, bump: UseStateSetter
         if c.pubkey.is_none() {
             return;
         }
+        let Some(contract_key) = c.contract_key.clone() else { return };
         (
             ws,
             c.name.clone(),
             c.delegate_key.clone(),
-            c.contract_key.clone(),
+            contract_key,
         )
     };
 

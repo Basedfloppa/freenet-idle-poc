@@ -7,11 +7,20 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::Response;
 
-pub const CONTRACT_ID_B58: &str = "Cen8gZS67EjXx9K2wkPyG3ponESo8FeibjTtVnADwvmX";
-pub const CODE_HASH_B58: &str = "qnU9vps1fmtKosrYbUvjC1xh3VYR4X8su7DUBYZXwRU";
+// Presence contract — empty for now. Orange's `freenet 0.2.56`
+// hits issue #2924 (versioned-contract loading bug) when
+// validating initial contract state during PUT, so the contract
+// can't be published yet. Single-player mode runs without it; flip
+// these back on once the prod node is upgraded to a freenet-core
+// that strips the version prefix before wasmtime compile.
+pub const CONTRACT_ID_B58: &str = "";
+pub const CODE_HASH_B58: &str = "";
 
-pub const DELEGATE_KEY_B58: &str = "8UaHj6niFaQyo2q53Y4ujsVYDTgBU2r19gtAA3reSWhm";
-pub const DELEGATE_CODE_HASH_B58: &str = "D4BFC9xqyxoFWLmfTxjPpESxvofaMSwRSmwcLNX5fYq6";
+// Delegate published on orange 2026-05-12 via ssh + local-built
+// `fdev publish delegate`. Delegate path is unaffected by the
+// contract-store bug because it doesn't run validate_state.
+pub const DELEGATE_KEY_B58: &str = "BFi7ubSuRNWpMiu2Mca1FWu1BpSeXUQs5CY3g1wtn6ZZ";
+pub const DELEGATE_CODE_HASH_B58: &str = "4pQKSkLoBreJMuEkEYihLsRX69rpghk6z1eXQJ6yJ9w2";
 
 /// Mailbox contract — payload-agnostic player-to-player message
 /// bus. Subscribed on connect like the presence contract. Empty

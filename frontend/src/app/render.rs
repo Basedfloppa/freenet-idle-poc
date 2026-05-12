@@ -712,8 +712,14 @@ pub fn render_core(
             { render_onboarding(c.onboarding_step, on_onboarding_next, on_onboarding_skip) }
             <header class="page-head">
                 <div class="title-row">
-                    <h1>{ "Freenet Idle" }</h1>
+                    <h1>{ "Freenet Idle PoC" }</h1>
                     <span class={status_pill_cls}>{ status_text(c) }</span>
+                    <a class="repo-link"
+                       href="https://github.com/Basedfloppa/freenet-idle-poc"
+                       target="_blank"
+                       rel="noopener noreferrer">
+                        { "source ↗" }
+                    </a>
                 </div>
                 <p class="status">{ &c.status }</p>
             </header>

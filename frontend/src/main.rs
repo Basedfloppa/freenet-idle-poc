@@ -63,13 +63,12 @@ fn app() -> Html {
                     return Box::new(|| ()) as Box<dyn FnOnce()>;
                 }
             };
-            let contract_key = match parse_contract_key(CONTRACT_ID_B58, CODE_HASH_B58) {
-                Ok(k) => k,
-                Err(e) => {
-                    web_sys::console::error_1(&format!("contract key: {e}").into());
-                    return Box::new(|| ()) as Box<dyn FnOnce()>;
-                }
-            };
+            // Presence is now optional, mirroring mailbox/guilds: empty
+            // ids leave us in single-player mode (delegate still works,
+            // no leaderboard / World Boss). A non-empty pair that fails
+            // to parse is still a hard error — it's a configuration
+            // typo, not a "feature disabled" signal.
+            let contract_key = parse_contract_key(CONTRACT_ID_B58, CODE_HASH_B58).ok();
 
             *core.borrow_mut() = Some(Core {
                 pubkey: None,

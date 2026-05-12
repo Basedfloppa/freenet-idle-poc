@@ -48,10 +48,13 @@ pub struct Core {
     /// frame from the contract.
     pub cumulative_damage: BTreeMap<PubKey, u64>,
     pub ws: Option<WsCell>,
-    /// Both keys are resolved from `dev-keys.json` (if present)
-    /// during `connect_inner` and cached here. Heartbeats use them
-    /// directly so we don't re-parse on every tick.
-    pub contract_key: ContractKey,
+    /// Parsed presence contract key — `None` if not configured (empty
+    /// constants AND no `dev-keys.json` override). When `Some`, the
+    /// frontend subscribes on connect and heartbeats publish signed
+    /// Inventory deltas. When `None`, the app runs in single-player
+    /// mode: delegate still owns the inventory locally, but no other
+    /// players or World Boss aggregate are visible.
+    pub contract_key: Option<ContractKey>,
     pub delegate_key: DelegateKey,
     pub status: String,
     /// Currently-visible section. UI-only state; the delegate has

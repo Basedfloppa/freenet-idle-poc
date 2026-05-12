@@ -264,6 +264,18 @@ h3 { font-size: 0.82em; color: var(--fg-muted); margin: 1em 0 0.4em; text-transf
     gap: 1em;
     flex-wrap: wrap;
 }
+.repo-link {
+    font-size: 0.8em;
+    color: var(--fg-muted);
+    text-decoration: none;
+    border: 1px solid var(--border-soft);
+    padding: 2px 9px;
+    border-radius: 12px;
+}
+.repo-link:hover {
+    color: var(--fg);
+    border-color: var(--fg-muted);
+}
 
 /* status pills */
 .pill {

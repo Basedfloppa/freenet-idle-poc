@@ -88,17 +88,18 @@ async fn connect_inner(
     bump: UseStateSetter<u64>,
 ) -> Result<(), String> {
     let dev = load_dev_keys().await;
+    // All three aggregator contracts are now optional: empty / unparseable
+    // ids leave the corresponding feature disabled. The delegate is the
+    // only hard dependency — without it we can't even resolve identity.
     let contract_key = parse_contract_key(
         &dev.contract_or(CONTRACT_ID_B58),
         &dev.code_or(CODE_HASH_B58),
-    )?;
+    )
+    .ok();
     let delegate_key = delegate_client::parse_delegate_key(
         &dev.delegate_or(DELEGATE_KEY_B58),
         &dev.delegate_code_or(DELEGATE_CODE_HASH_B58),
     )?;
-    // Mailbox is optional — empty / unparseable keys leave us
-    // connected to presence only. Future feature flags can build on
-    // top once the contract is published.
     let mailbox_key = parse_contract_key(
         &dev.mailbox_contract_or(MAILBOX_CONTRACT_ID_B58),
         &dev.mailbox_code_or(MAILBOX_CODE_HASH_B58),
@@ -115,7 +116,6 @@ async fn connect_inner(
         c.mailbox_key = mailbox_key.clone();
         c.guilds_key = guilds_key.clone();
     }
-    let instance = *contract_key.id();
     let socket = web_sys::WebSocket::new(&ws_url()).map_err(|e| format!("ws: {e:?}"))?;
 
     let (open_tx, open_rx) = crate::oneshot();
@@ -221,18 +221,27 @@ async fn connect_inner(
     }
     bump.set(now_ms());
 
-    let sub =
-        ClientRequest::ContractOp(ContractRequest::Subscribe { key: instance, summary: None });
-    ws.borrow_mut().send(sub).await.map_err(|e| format!("subscribe: {e:?}"))?;
+    // Presence contract — only subscribe when configured. Same
+    // optional shape as mailbox/guilds. In single-player mode the
+    // app skips this block entirely: no World Boss, no leaderboard.
+    if let Some(p_key) = contract_key.as_ref() {
+        let instance = *p_key.id();
+        let sub =
+            ClientRequest::ContractOp(ContractRequest::Subscribe { key: instance, summary: None });
+        ws.borrow_mut()
+            .send(sub)
+            .await
+            .map_err(|e| format!("subscribe: {e:?}"))?;
 
-    let get = ClientRequest::ContractOp(ContractRequest::Get {
-        key: instance,
-        return_contract_code: false,
-        subscribe: false,
-        blocking_subscribe: false,
-    });
-    if let Err(e) = ws.borrow_mut().send(get).await {
-        web_sys::console::warn_1(&format!("initial Get: {e:?}").into());
+        let get = ClientRequest::ContractOp(ContractRequest::Get {
+            key: instance,
+            return_contract_code: false,
+            subscribe: false,
+            blocking_subscribe: false,
+        });
+        if let Err(e) = ws.borrow_mut().send(get).await {
+            web_sys::console::warn_1(&format!("initial Get: {e:?}").into());
+        }
     }
 
     // Mailbox is optional — only subscribe if a key was successfully

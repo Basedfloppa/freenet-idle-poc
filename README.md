@@ -94,6 +94,62 @@ In a separate terminal:
 FDEV=/custom/path/fdev WS_PORT=7510 ./scripts/dev.sh
 ```
 
+## Publishing to a prod node (orange / baka)
+
+The dev scripts above target a local node; prod deploys go through
+two dedicated scripts. Versions must align — the local `fdev` from
+`freenet-core/target/debug/` produces WASM with imports that need
+`freenet-core ≥ 0.2.x` on the receiving node.
+
+### First-time deploy
+
+`scripts/prod-publish.sh` builds + publishes the three contracts +
+delegate to a remote node, patches `frontend/src/app/keys.rs` with
+the resulting IDs, builds the frontend with `trunk build --release`,
+and finally pushes the bundle as a website contract via `fdev
+website publish`.
+
+Typical invocation, via SSH local-forward (orange's WS API on the
+LAN is `192.168.88.247:7509`, but it's simplest to forward through
+SSH to the loopback you control):
+
+```fish
+ssh -fNT -L 17509:127.0.0.1:7509 orange
+NODE_URL=ws://127.0.0.1:17509 ./scripts/prod-publish.sh
+```
+
+What this leaves behind:
+
+- `frontend/src/app/keys.rs` — patched with the new compile-time defaults
+  (`.bak` saved alongside). Review the diff and commit.
+- `frontend/prod-webapp-id.txt` — the website contract ID. Used by
+  `prod-update-webapp.sh` and worth committing so teammates can
+  iterate without re-running the full deploy.
+- `frontend/dev-keys.json` — mirrored to the prod IDs so the local
+  `trunk build --release` is coherent. Re-run `dev-publish.sh` to
+  switch back to local-node IDs after deploy.
+
+Set `PATCH_KEYS=0` to skip the `keys.rs` edit (when you want to
+inspect the IDs first), or `STAGE_WEBAPP=0` to stop after publishing
+the contracts/delegate.
+
+### Subsequent webapp-only updates
+
+When only the UI changed, `scripts/prod-update-webapp.sh` skips the
+heavy contract/delegate republish: `trunk build --release` → `fdev
+website update` → SSH the gateway and `rm -rf` the unpacked webapp
+cache (per the [webapp-cache-invalidation](../) memory — without
+this the gateway keeps serving the previous version even after the
+new one lands in the DHT).
+
+```fish
+NODE_URL=ws://127.0.0.1:17509 ./scripts/prod-update-webapp.sh
+```
+
+Reads `frontend/prod-webapp-id.txt` automatically; override with
+`WEBAPP_ID=…`. Set `SSH_HOST=""` to skip the cache rm if your
+deployment uses a different invalidation path.
+
 ## What lives in which layer
 
 | Layer | Where it lives | What goes there | When it resets |

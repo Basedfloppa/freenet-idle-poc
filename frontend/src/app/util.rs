@@ -51,23 +51,54 @@ pub fn now_ms() -> u64 {
 }
 
 pub fn ws_url() -> String {
-    // Priority: `?ws=…` query param > prefs.ws_url_override > default.
-    // The query param wins so a stale prefs entry can't override an
-    // explicit URL chosen via shareable link.
+    // Priority:
+    //   1. `?ws=…` query param  — shareable explicit override
+    //   2. prefs.ws_url_override — user-configured in Settings
+    //   3. same-host derivation when served from a freenet gateway
+    //      (URL path contains `/v1/contract/web/`): the node that
+    //      handed us this HTML is exposing its WS API on the same
+    //      host/port, so default to that.
+    //   4. DEFAULT_WS — `ws://127.0.0.1:7509/...`, used for trunk
+    //      dev mode (page on :9003) and any other off-gateway host.
     if let Some(win) = web_sys::window() {
-        if let Ok(search) = win.location().search() {
+        let location = win.location();
+        if let Ok(search) = location.search() {
             if let Some(start) = search.find("ws=") {
                 let rest = &search[start + 3..];
                 let end = rest.find('&').unwrap_or(rest.len());
                 return rest[..end].to_string();
             }
         }
-    }
-    let prefs = load_prefs();
-    if !prefs.ws_url_override.is_empty() {
-        return prefs.ws_url_override;
+        let prefs = load_prefs();
+        if !prefs.ws_url_override.is_empty() {
+            return prefs.ws_url_override;
+        }
+        if let Some(derived) = derive_same_host_ws(&location) {
+            return derived;
+        }
+        return DEFAULT_WS.to_string();
     }
     DEFAULT_WS.to_string()
+}
+
+/// Build `ws[s]://<host>/v1/contract/command?encodingProtocol=native`
+/// from `window.location` IF the current page was served from a
+/// freenet gateway path (`…/v1/contract/web/<id>/…`). Returns `None`
+/// otherwise — trunk's dev server, file://, or anything else falls
+/// through to `DEFAULT_WS` so local dev keeps hitting `:7509`.
+fn derive_same_host_ws(location: &web_sys::Location) -> Option<String> {
+    let pathname = location.pathname().ok()?;
+    if !pathname.contains("/v1/contract/web/") {
+        return None;
+    }
+    let host = location.host().ok().filter(|h| !h.is_empty())?;
+    let scheme = match location.protocol().ok().as_deref() {
+        Some("https:") => "wss",
+        _ => "ws",
+    };
+    Some(format!(
+        "{scheme}://{host}/v1/contract/command?encodingProtocol=native"
+    ))
 }
 
 // --- minimal oneshot<Result<(), String>> for the connect-open path ---
