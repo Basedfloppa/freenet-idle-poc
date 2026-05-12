@@ -25,7 +25,12 @@ if "%WS_PORT%"=="" set "WS_PORT=7509"
 netstat -ano | findstr "LISTENING" | findstr ":%WS_PORT% " >nul
 if errorlevel 1 (
     echo [dev] WARNING: nothing listening on 127.0.0.1:%WS_PORT%
-    echo [dev] start a local node first, e.g.:
+    echo [dev] start a local node first -- use the LOCAL-BUILT binary,
+    echo [dev] NOT `freenet` from PATH: dev-publish.bat runs fdev from
+    echo [dev] freenet-core\target\debug\, and a node from a different
+    echo [dev] version fails publish with
+    echo [dev]   "unknown import: freenet_contract_io::__frnt__fill_buffer".
+    echo [dev] example:
     echo       %HERE%\..\freenet-core\target\debug\freenet.exe local --ws-api-address 0.0.0.0 --ws-api-port %WS_PORT% --data-dir %TEMP%\freenet-local
     echo [dev] continuing anyway -- publish will fail loudly if the node isn't up.
 )

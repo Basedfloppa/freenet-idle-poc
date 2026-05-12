@@ -21,7 +21,12 @@ WS_PORT="${WS_PORT:-7509}"
 
 if ! ss -tnl 2>/dev/null | grep -q ":${WS_PORT}\b"; then
     echo "[dev] WARNING: nothing listening on 127.0.0.1:${WS_PORT}"
-    echo "[dev] start a local node first, e.g.:"
+    echo "[dev] start a local node first — use the LOCAL-BUILT binary,"
+    echo "[dev] NOT \`freenet\` from PATH: dev-publish.sh runs fdev from"
+    echo "[dev] freenet-core/target/debug/, and a node from a different"
+    echo "[dev] version fails publish with"
+    echo "[dev]   \"unknown import: freenet_contract_io::__frnt__fill_buffer\"."
+    echo "[dev] example:"
     echo "      $HERE/../freenet-core/target/debug/freenet local \\"
     echo "          --ws-api-address 0.0.0.0 --ws-api-port $WS_PORT \\"
     echo "          --data-dir /tmp/freenet-local"
@@ -42,4 +47,9 @@ WATCH_PID=$!
 echo "[dev] watcher PID=$WATCH_PID"
 echo "[dev] starting trunk serve (Ctrl-C kills both)"
 cd "$HERE/frontend"
-exec trunk serve
+# NOTE: deliberately NOT `exec trunk serve` — exec would replace the
+# bash process and drop the EXIT/INT/TERM trap, so the watcher would
+# be reparented to init and survive Ctrl-C. (Historical bug: that
+# left a fleet of orphan `dev-watch.sh` processes behind each
+# session.) Keep bash alive so cleanup fires.
+trunk serve

@@ -32,7 +32,7 @@ use std::rc::Rc;
 use freenet_stdlib::client_api::{ClientError, ClientRequest, Error as WebApiError, HostResponse};
 use wasm_bindgen::{prelude::Closure, JsCast, JsValue};
 use web_sys::js_sys::{ArrayBuffer, Uint8Array};
-use web_sys::{BinaryType, ErrorEvent, MessageEvent, WebSocket};
+use web_sys::{BinaryType, Event, MessageEvent, WebSocket};
 
 /// Minimal stand-in for `freenet_stdlib::client_api::WebApi`.
 pub struct WsShim {
@@ -43,7 +43,7 @@ pub struct WsShim {
     /// `Closure::forget` leak the stdlib version uses.
     _on_message: Closure<dyn FnMut(MessageEvent)>,
     _on_open: Closure<dyn FnMut()>,
-    _on_error: Closure<dyn FnMut(ErrorEvent)>,
+    _on_error: Closure<dyn FnMut(Event)>,
     _on_close: Closure<dyn FnMut(web_sys::CloseEvent)>,
 }
 
@@ -130,15 +130,17 @@ impl WsShim {
         socket.set_onopen(Some(on_open.as_ref().unchecked_ref()));
 
         let on_error = {
+            // WebSocket's "error" event is a plain Event, NOT an
+            // ErrorEvent — `.filename`/`.lineno`/`.message` are
+            // undefined there, so casting and reading them panics
+            // inside passStringToWasm0. The browser also doesn't
+            // expose the underlying cause (e.g. ECONNREFUSED) for
+            // security reasons; the close event that follows is the
+            // only signal we get. Just record that an error fired.
             let mut error_handler = error_handler.clone();
-            Closure::<dyn FnMut(ErrorEvent)>::new(move |e: ErrorEvent| {
+            Closure::<dyn FnMut(Event)>::new(move |_: Event| {
                 error_handler(WebApiError::ConnectionError(serde_json::json!({
-                    "error": format!(
-                        "{file}:{lineno}: {msg}",
-                        file = e.filename(),
-                        lineno = e.lineno(),
-                        msg = e.message()
-                    ),
+                    "error": "websocket error",
                     "source": "exec error"
                 })));
             })
