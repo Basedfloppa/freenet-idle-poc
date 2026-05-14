@@ -9,8 +9,8 @@ use ed25519_dalek::SigningKey;
 use freenet_stdlib::prelude::*;
 
 use shared::{
-    Inventory, InventoryV10, InventoryV9, InventoryWire, FORM_HUMAN, IDENTITY_SECRET_ID,
-    INVENTORY_SECRET_ID, STARTING_HP,
+    Inventory, InventoryV10, InventoryV9, InventoryWire, UiPrefs, FORM_HUMAN, IDENTITY_SECRET_ID,
+    INVENTORY_SECRET_ID, STARTING_HP, UI_PREFS_SECRET_ID,
 };
 
 use crate::derived::max_hp_of;
@@ -63,6 +63,26 @@ pub fn load_inventory_raw(ctx: &mut DelegateCtx) -> Inventory {
         return InventoryV10::from(inv_v9);
     }
     Inventory::default()
+}
+
+/// Load UI prefs (display name + theme). Missing or malformed →
+/// `UiPrefs::default()`. Frontend falls back to its own defaults
+/// when a field is `None`.
+pub fn load_ui_prefs(ctx: &mut DelegateCtx) -> UiPrefs {
+    let Some(bytes) = ctx.get_secret(UI_PREFS_SECRET_ID) else {
+        return UiPrefs::default();
+    };
+    bincode::deserialize(&bytes).unwrap_or_default()
+}
+
+/// Persist UI prefs. The whole blob is replaced each call — callers
+/// are expected to read-modify-write when changing a single field.
+pub fn save_ui_prefs(ctx: &mut DelegateCtx, prefs: &UiPrefs) -> Result<(), String> {
+    let bytes = bincode::serialize(prefs).map_err(|e| format!("ser ui prefs: {e}"))?;
+    if !ctx.set_secret(UI_PREFS_SECRET_ID, &bytes) {
+        return Err("set_secret rejected".into());
+    }
+    Ok(())
 }
 
 /// Persist inventory always as the latest `InventoryWire` variant.

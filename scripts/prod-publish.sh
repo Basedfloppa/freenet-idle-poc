@@ -100,11 +100,12 @@ build_and_publish_contract() {
 
     echo "[prod-publish] publishing $label to prod"
     pub_log="$(mktemp)"
-    # `--release` flips fdev from "local dry-run" to "actually release
-    # into the network". `network` MODE positional arg matches the
-    # prod node's launch mode (`freenet network`).
-    CARGO_TARGET_DIR="$PWD/target" "$FDEV" "${NODE_ARGS[@]}" network publish \
-        --release \
+    # No `--release` flag: `fdev publish` (commands.rs:60) bails on
+    # release=true with "Cannot publish contracts in the network yet".
+    # The target node (orange) runs in `network` mode and is a
+    # gateway, so a plain PUT received over WS propagates to the DHT
+    # automatically regardless of fdev's MODE.
+    CARGO_TARGET_DIR="$PWD/target" "$FDEV" "${NODE_ARGS[@]}" publish \
         --code "build/freenet/$artefact" \
         contract --state "$state_file" 2>&1 | tee "$pub_log"
     instance_id="$(extract 'Publishing contract \K[1-9A-HJ-NP-Za-km-z]{30,}' "$pub_log")"
@@ -145,8 +146,7 @@ fi
 
 echo "[prod-publish] publishing identity-delegate to prod"
 DELEGATE_PUB_LOG="$(mktemp)"
-CARGO_TARGET_DIR="$PWD/target" "$FDEV" "${NODE_ARGS[@]}" network publish \
-    --release \
+CARGO_TARGET_DIR="$PWD/target" "$FDEV" "${NODE_ARGS[@]}" publish \
     --code build/freenet/identity_delegate \
     delegate 2>&1 | tee "$DELEGATE_PUB_LOG"
 DELEGATE_KEY="$(extract 'key: \K[1-9A-HJ-NP-Za-km-z]{30,}' "$DELEGATE_PUB_LOG")"
@@ -237,13 +237,17 @@ fi
 ###############################################################################
 echo "[prod-publish] publishing webapp via fdev website publish"
 WEBSITE_PUB_LOG="$(mktemp)"
-"$FDEV" "${NODE_ARGS[@]}" network website publish \
+"$FDEV" "${NODE_ARGS[@]}" website publish \
     --key "$WEBSITE_KEY" "$HERE/frontend/dist" 2>&1 | tee "$WEBSITE_PUB_LOG"
 
-# The website wrapper goes through the same Put path; try the same
-# regex first, fall back to looking for `key:` if the wrapper prints
-# it that way.
-WEBAPP_ID="$(extract 'Publishing contract \K[1-9A-HJ-NP-Za-km-z]{30,}' "$WEBSITE_PUB_LOG")"
+# Capture the webapp contract id. Patterns in priority order:
+#   "Publishing website as contract <id> (version <n>)" — current fdev
+#   "Publishing contract <id>"                          — older fdev
+#   "contract id: <id>"                                 — legacy
+WEBAPP_ID="$(extract 'Publishing website as contract \K[1-9A-HJ-NP-Za-km-z]{30,}' "$WEBSITE_PUB_LOG")"
+if [[ -z "$WEBAPP_ID" ]]; then
+    WEBAPP_ID="$(extract 'Publishing contract \K[1-9A-HJ-NP-Za-km-z]{30,}' "$WEBSITE_PUB_LOG")"
+fi
 if [[ -z "$WEBAPP_ID" ]]; then
     WEBAPP_ID="$(extract 'contract id: \K[1-9A-HJ-NP-Za-km-z]{30,}' "$WEBSITE_PUB_LOG")"
 fi

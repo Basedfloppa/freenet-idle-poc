@@ -129,6 +129,16 @@ impl WsShim {
         });
         socket.set_onopen(Some(on_open.as_ref().unchecked_ref()));
 
+        // Browsers fire BOTH `onerror` and `onclose` on a single
+        // connection failure (the spec mandates a `close` after
+        // `error`). With both invoking `error_handler` unguarded, the
+        // upstream reconnect logic gets scheduled twice in parallel
+        // — racing two new `WsShim` instances, doubling delegate
+        // calls in flight, and stacking orphan `Pending` registries.
+        // The `errored` flag funnels the pair into a single
+        // `error_handler` call (first event wins).
+        let errored = Rc::new(std::cell::Cell::new(false));
+
         let on_error = {
             // WebSocket's "error" event is a plain Event, NOT an
             // ErrorEvent — `.filename`/`.lineno`/`.message` are
@@ -137,8 +147,12 @@ impl WsShim {
             // expose the underlying cause (e.g. ECONNREFUSED) for
             // security reasons; the close event that follows is the
             // only signal we get. Just record that an error fired.
+            let errored = errored.clone();
             let mut error_handler = error_handler.clone();
             Closure::<dyn FnMut(Event)>::new(move |_: Event| {
+                if errored.replace(true) {
+                    return;
+                }
                 error_handler(WebApiError::ConnectionError(serde_json::json!({
                     "error": "websocket error",
                     "source": "exec error"
@@ -148,8 +162,12 @@ impl WsShim {
         socket.set_onerror(Some(on_error.as_ref().unchecked_ref()));
 
         let on_close = {
+            let errored = errored.clone();
             let mut error_handler = error_handler;
             Closure::<dyn FnMut(web_sys::CloseEvent)>::new(move |_: web_sys::CloseEvent| {
+                if errored.replace(true) {
+                    return;
+                }
                 error_handler(WebApiError::ConnectionError(serde_json::json!({
                     "error": "connection closed",
                     "source": "close"

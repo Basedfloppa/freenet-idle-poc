@@ -39,6 +39,21 @@ impl Pending {
         self.awaiting.insert(id, tx);
     }
 
+    /// Fail every awaiting future with the same reason. Called by the
+    /// WS result router when the node returns a top-level
+    /// `ClientError` (no per-tx routing info), so the awaiting UI
+    /// surfaces the actual cause instead of hanging on the status
+    /// "asking delegate for identity…" forever.
+    pub fn fail_all(&mut self, reason: String) {
+        let drained: Vec<(u64, OneshotTx)> = self.awaiting.drain().collect();
+        for (id, tx) in drained {
+            web_sys::console::warn_1(
+                &format!("[delegate-client] failing id={id}: {reason}").into(),
+            );
+            let _ = tx.fail(reason.clone());
+        }
+    }
+
     /// Called from the WS result handler when a `DelegateResponse`
     /// frame arrives. Decodes the embedded `AppResponse` and routes
     /// it to whichever future is awaiting this request id.
@@ -120,6 +135,18 @@ pub async fn call(
 }
 
 // --- Oneshot tailored for AppResponse -----------------------------
+//
+// `OneshotState::value` holds the full `Result` so the channel can
+// resolve with either a delivered `AppResponse` (Ok) or a fail reason
+// (Err). Three completion paths:
+//   1. `send()`           — happy path, response decoded from node.
+//   2. `fail()`           — caller surfaces a known error (e.g.
+//                            `ClientError` arriving on the WS).
+//   3. `Drop for Tx`      — Tx leaves scope without resolving (the
+//                            `Pending` map is rebuilt mid-call on WS
+//                            reconnect → in-flight awaiters used to
+//                            hang forever; now they get a "cancelled"
+//                            Err and bubble up to the UI status).
 
 fn oneshot() -> (OneshotTx, OneshotRx) {
     let inner = Rc::new(RefCell::new(OneshotState::default()));
@@ -128,7 +155,7 @@ fn oneshot() -> (OneshotTx, OneshotRx) {
 
 #[derive(Default)]
 struct OneshotState {
-    value: Option<AppResponse>,
+    value: Option<Result<AppResponse, String>>,
     waker: Option<std::task::Waker>,
 }
 
@@ -137,6 +164,14 @@ pub struct OneshotTx {
 }
 impl OneshotTx {
     fn send(self, v: AppResponse) -> Result<(), ()> {
+        self.resolve(Ok(v))
+    }
+
+    fn fail(self, reason: String) -> Result<(), ()> {
+        self.resolve(Err(reason))
+    }
+
+    fn resolve(self, v: Result<AppResponse, String>) -> Result<(), ()> {
         let mut i = self.inner.borrow_mut();
         if i.value.is_some() {
             return Err(());
@@ -146,6 +181,21 @@ impl OneshotTx {
             w.wake();
         }
         Ok(())
+    }
+}
+
+impl Drop for OneshotTx {
+    fn drop(&mut self) {
+        let mut i = self.inner.borrow_mut();
+        if i.value.is_some() {
+            return;
+        }
+        i.value = Some(Err(
+            "delegate call cancelled (WS reconnect or shutdown)".to_string(),
+        ));
+        if let Some(w) = i.waker.take() {
+            w.wake();
+        }
     }
 }
 
@@ -160,7 +210,7 @@ impl std::future::Future for OneshotRx {
     ) -> std::task::Poll<Self::Output> {
         let mut i = self.inner.borrow_mut();
         if let Some(v) = i.value.take() {
-            std::task::Poll::Ready(Ok(v))
+            std::task::Poll::Ready(v)
         } else {
             i.waker = Some(cx.waker().clone());
             std::task::Poll::Pending

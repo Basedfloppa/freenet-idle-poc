@@ -72,7 +72,10 @@ fn app() -> Html {
 
             *core.borrow_mut() = Some(Core {
                 pubkey: None,
-                name: "player".into(),
+                // Delegate's `LoadUiPrefs` overrides this on connect.
+                // Defaulting here so first-paint has something to
+                // show before the WS handshake completes.
+                name: DEFAULT_NAME.into(),
                 inventory: Inventory::default(),
                 last_published: Inventory::default(),
                 last_published_ms: None,
@@ -83,8 +86,9 @@ fn app() -> Html {
                 contract_key,
                 delegate_key,
                 status: "connecting…".into(),
+                prefs_loaded: false,
                 current_tab: Tab::Farm,
-                current_theme: load_theme(),
+                current_theme: DEFAULT_THEME.into(),
                 prefs: load_prefs(),
                 last_auto_tick_ms: 0,
                 last_heartbeat_tick_ms: 0,
@@ -97,11 +101,19 @@ fn app() -> Html {
                 new_guild_name_input: String::new(),
                 toasts: Vec::new(),
                 shown_achievements: None,
-                onboarding_step: if onboarding_dismissed() { None } else { Some(0) },
+                // Wizard always opens at step 0 on cold load. The
+                // delegate's `LoadUiPrefs` reply (in
+                // `freenet::actions::ui_prefs::load_ui_prefs_once`)
+                // closes it for returning players a few hundred ms
+                // later. Cost: a brief flash of step 0 on reload for
+                // returning users. Benefit: new players always see
+                // the wizard regardless of sandbox-localStorage state.
+                onboarding_step: Some(0),
             });
-            // Apply saved theme immediately so the first paint is in
-            // the right palette (avoids a parchment → dark flash).
-            apply_theme(&load_theme());
+            // Apply the default theme for first paint; the delegate's
+            // `LoadUiPrefs` reply re-applies the player's saved theme
+            // once the WS handshake completes.
+            apply_theme(DEFAULT_THEME);
             bump_setter.set(now_ms());
 
             connect_and_setup(core.clone(), pending.clone(), bump_setter.clone());
@@ -243,5 +255,38 @@ fn app() -> Html {
 
 fn main() {
     wasm_logger::init(wasm_logger::Config::default());
+    set_shell_title("Freenet Idle PoC");
     yew::Renderer::<App>::new().render();
+}
+
+/// Tell the outer freenet gateway shell to display this string as the
+/// browser tab title. The shell page (served by the gateway at
+/// `/v1/contract/web/<id>/`) hosts our content in a sandboxed iframe;
+/// without this postMessage the tab title stays "Freenet" (the shell's
+/// own `<title>`). Protocol defined in freenet-core
+/// `server/path_handlers.rs:694-697`; the shell truncates to 128 chars.
+fn set_shell_title(title: &str) {
+    use wasm_bindgen::JsValue;
+    let Some(win) = web_sys::window() else { return };
+    let parent = match win.parent() {
+        Ok(Some(p)) => p,
+        _ => return,
+    };
+    let msg = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &msg,
+        &JsValue::from_str("__freenet_shell__"),
+        &JsValue::TRUE,
+    );
+    let _ = js_sys::Reflect::set(
+        &msg,
+        &JsValue::from_str("type"),
+        &JsValue::from_str("title"),
+    );
+    let _ = js_sys::Reflect::set(
+        &msg,
+        &JsValue::from_str("title"),
+        &JsValue::from_str(title),
+    );
+    let _ = parent.post_message(&msg, "*");
 }

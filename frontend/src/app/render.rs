@@ -28,7 +28,7 @@ use crate::game::derived::{
     player_speed_evasion, status_code, status_text, world_boss_state, xp_in_level,
 };
 
-use super::core::{dismiss_onboarding, ingest_inventory, Core, ONBOARDING_STEPS};
+use super::core::{ingest_inventory, Core, ONBOARDING_STEPS};
 use super::util::DEFAULT_WS;
 use super::prefs::{apply_theme, clear_all_prefs, save_prefs, SyncCadence, THEMES};
 use super::types::{Tab, ToggleField};
@@ -48,6 +48,7 @@ pub fn render_core(
 ) -> Html {
     let on_name = {
         let core = core_cell.clone();
+        let pending = pending.clone();
         let bump = bump.clone();
         // `oninput` (fires every keystroke) — not `onchange` (fires
         // only on blur). With auto-mission running, periodic
@@ -58,9 +59,24 @@ pub fn render_core(
         // the input the source of truth in real time.
         Callback::from(move |e: InputEvent| {
             let input: HtmlInputElement = e.target_unchecked_into();
+            let new_name = truncate(&input.value(), shared::MAX_NAME_BYTES);
             if let Some(c) = core.borrow_mut().as_mut() {
-                c.name = truncate(&input.value(), shared::MAX_NAME_BYTES);
+                c.name = new_name.clone();
             }
+            // Persist via the delegate (one RPC per keystroke — cheap
+            // on a local node, and the WS pipeline coalesces inflight
+            // calls). localStorage isn't reliable here because the
+            // webapp iframe is null-origin in the default Freenet
+            // sandbox, so the delegate is the only place this value
+            // survives a reload.
+            crate::freenet::actions::ui_prefs::save_ui_prefs_once(
+                core.clone(),
+                pending.clone(),
+                bump.clone(),
+                Some(new_name),
+                None,
+                None,
+            );
             bump.set(now_ms());
         })
     };
@@ -401,20 +417,30 @@ pub fn render_core(
     };
 
     // Theme picker factory — clicking a theme button writes the id
-    // to `<html data-theme="…">`, persists it in localStorage, and
+    // to `<html data-theme="…">`, persists it via the delegate, and
     // mirrors it on `Core.current_theme` so the picker buttons
     // reflect the active selection without a reload.
     let mk_theme_cb = {
         let core = core_cell.clone();
+        let pending = pending.clone();
         let bump = bump.clone();
         move |theme_id: &'static str| {
             let core = core.clone();
+            let pending = pending.clone();
             let bump = bump.clone();
             Callback::from(move |_| {
                 apply_theme(theme_id);
                 if let Some(c) = core.borrow_mut().as_mut() {
                     c.current_theme = theme_id.to_string();
                 }
+                crate::freenet::actions::ui_prefs::save_ui_prefs_once(
+                    core.clone(),
+                    pending.clone(),
+                    bump.clone(),
+                    None,
+                    Some(theme_id.to_string()),
+                    None,
+                );
                 bump.set(now_ms());
             })
         }
@@ -586,34 +612,55 @@ pub fn render_core(
         })
     };
 
-    // Onboarding wizard: advance step / dismiss / restart. Each
-    // closure follows the same shape — mutate `c.onboarding_step`,
-    // re-bump the view. `dismiss_onboarding()` writes to localStorage
-    // so the user doesn't see it again after a refresh.
+    // Onboarding wizard: advance step / dismiss. Each closure
+    // mutates `c.onboarding_step` and re-bumps the view. The
+    // "dismissed" flag is persisted via the delegate
+    // (`save_ui_prefs_once`) so it survives reload — localStorage
+    // can't be relied on inside the sandboxed iframe.
     let on_onboarding_next = {
         let core = core_cell.clone();
+        let pending = pending.clone();
         let bump = bump.clone();
         Callback::from(move |_: MouseEvent| {
+            let mut just_finished = false;
             if let Some(c) = core.borrow_mut().as_mut() {
                 let next = c.onboarding_step.map(|s| s + 1).unwrap_or(0);
                 if next >= ONBOARDING_STEPS {
                     c.onboarding_step = None;
-                    dismiss_onboarding();
+                    just_finished = true;
                 } else {
                     c.onboarding_step = Some(next);
                 }
+            }
+            if just_finished {
+                crate::freenet::actions::ui_prefs::save_ui_prefs_once(
+                    core.clone(),
+                    pending.clone(),
+                    bump.clone(),
+                    None,
+                    None,
+                    Some(true),
+                );
             }
             bump.set(now_ms());
         })
     };
     let on_onboarding_skip = {
         let core = core_cell.clone();
+        let pending = pending.clone();
         let bump = bump.clone();
         Callback::from(move |_: MouseEvent| {
             if let Some(c) = core.borrow_mut().as_mut() {
                 c.onboarding_step = None;
             }
-            dismiss_onboarding();
+            crate::freenet::actions::ui_prefs::save_ui_prefs_once(
+                core.clone(),
+                pending.clone(),
+                bump.clone(),
+                None,
+                None,
+                Some(true),
+            );
             bump.set(now_ms());
         })
     };

@@ -34,3 +34,8 @@ pub const IDENTITY_SECRET_ID: &[u8] = b"identity-seed-v1";
 /// `auto_run_enabled`, `auto_last_tick_ms`, `last_catchup` for
 /// offline auto-mission progression.
 pub const INVENTORY_SECRET_ID: &[u8] = b"inventory-v9";
+/// UI-only persistence (display name, theme id, future cosmetic
+/// prefs). Separate from inventory so a schema bump on either side
+/// doesn't reset the other. The delegate stores a bincode'd
+/// [`crate::rpc::UiPrefs`] under this key.
+pub const UI_PREFS_SECRET_ID: &[u8] = b"ui-prefs-v1";

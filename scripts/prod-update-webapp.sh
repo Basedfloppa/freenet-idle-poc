@@ -73,7 +73,13 @@ trunk build --release
 
 echo
 echo "[prod-update] fdev website update"
-"$FDEV" "${NODE_ARGS[@]}" network website update \
+# No `network` MODE positional: fdev accepts only `local` / `network`
+# and our target (orange) is a network gateway, but its PUT path is
+# the same regardless of fdev's client-side MODE. The `--address` /
+# `--port` flags supply the connection target; MODE only gates the
+# `--release` flag which itself is gated by an `anyhow::bail!` in
+# `commands.rs:60` ("Cannot publish contracts in the network yet").
+"$FDEV" "${NODE_ARGS[@]}" website update \
     --key "$WEBSITE_KEY" "$HERE/frontend/dist"
 
 if [[ -n "$SSH_HOST" ]]; then

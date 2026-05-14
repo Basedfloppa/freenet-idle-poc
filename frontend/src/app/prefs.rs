@@ -12,18 +12,27 @@ pub const THEMES: &[(&str, &str)] = &[
     ("forest", "Forest"),
 ];
 pub const DEFAULT_THEME: &str = "parchment";
-const THEME_STORAGE_KEY: &str = "freenet-idle-theme";
+pub const DEFAULT_NAME: &str = "player";
 
-/// Where the unified prefs blob lives in `localStorage`. Theme is
-/// kept in its own key (`THEME_STORAGE_KEY`) because the
-/// pre-WASM inline script in `index.html` needs to read it
-/// without parsing JSON.
+/// Where the unified prefs blob lives in `localStorage`. NOTE: the
+/// sandboxed Freenet webapp iframe has a "null" document origin in
+/// the default Tier-1 sandbox, so writes here don't survive a page
+/// reload. The blob is kept for non-critical UI knobs (cadence,
+/// HP-pause threshold, etc.) that can tolerate resetting on reload;
+/// load-bearing settings (display name, theme) are persisted on the
+/// delegate via `crate::freenet::actions::ui_prefs`.
 const PREFS_STORAGE_KEY: &str = "freenet-idle-prefs";
 
-/// Push the requested theme id to `<html data-theme=...>` and
-/// persist the choice in localStorage so reloads keep the player's
-/// preference. Falls back silently when window/storage are absent
-/// (sandbox iframes, SSR-like contexts).
+/// Push the requested theme id to `<html data-theme=...>`.
+///
+/// The persistent copy lives on the delegate (see
+/// `freenet::actions::ui_prefs::save_ui_prefs_once`) — the sandboxed
+/// iframe's null origin breaks localStorage across reloads, so we
+/// cannot rely on it. The pre-WASM inline script in `index.html`
+/// still attempts a localStorage read for first-paint speed; in the
+/// sandbox it silently no-ops and we fall back to the parchment
+/// default until the delegate's `LoadUiPrefs` response lands a few
+/// hundred ms later.
 pub fn apply_theme(theme_id: &str) {
     let Some(window) = web_sys::window() else { return };
     if let Some(doc) = window.document() {
@@ -31,24 +40,6 @@ pub fn apply_theme(theme_id: &str) {
             let _ = root.set_attribute("data-theme", theme_id);
         }
     }
-    if let Ok(Some(storage)) = window.local_storage() {
-        let _ = storage.set_item(THEME_STORAGE_KEY, theme_id);
-    }
-}
-
-/// Read the persisted theme id, defaulting to `DEFAULT_THEME` if
-/// nothing's stored, the stored value isn't in `THEMES`, or
-/// localStorage isn't reachable.
-pub fn load_theme() -> String {
-    let Some(window) = web_sys::window() else { return DEFAULT_THEME.into() };
-    if let Ok(Some(storage)) = window.local_storage() {
-        if let Ok(Some(saved)) = storage.get_item(THEME_STORAGE_KEY) {
-            if THEMES.iter().any(|(id, _)| *id == saved) {
-                return saved;
-            }
-        }
-    }
-    DEFAULT_THEME.into()
 }
 
 /// How often the presence contract gets a fresh signed entry, and
@@ -169,7 +160,6 @@ pub fn clear_all_prefs() {
     let Some(window) = web_sys::window() else { return };
     if let Ok(Some(storage)) = window.local_storage() {
         let _ = storage.remove_item(PREFS_STORAGE_KEY);
-        let _ = storage.remove_item(THEME_STORAGE_KEY);
     }
     if let Some(location) = window.location().href().ok() {
         let _ = window.location().set_href(&location);

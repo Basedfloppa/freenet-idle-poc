@@ -32,6 +32,16 @@ pub fn heartbeat_once(core: CoreCell, pending: PendingCell, bump: UseStateSetter
         if c.pubkey.is_none() {
             return;
         }
+        // Block the first publish until the delegate's `LoadUiPrefs`
+        // reply has merged the persisted display name into Core.
+        // Without this, the unified-tick fires within ~1s of pubkey
+        // landing — well before `LoadUiPrefs` round-trips — and the
+        // first presence entry on the leaderboard ships
+        // `DEFAULT_NAME` even for returning users who saved a name
+        // long ago.
+        if !c.prefs_loaded {
+            return;
+        }
         let Some(contract_key) = c.contract_key.clone() else { return };
         (
             ws,

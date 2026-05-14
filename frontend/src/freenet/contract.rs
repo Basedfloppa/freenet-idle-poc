@@ -43,7 +43,17 @@ pub fn handle_response(
     let resp = match resp {
         Ok(r) => r,
         Err(e) => {
-            web_sys::console::warn_1(&format!("ws response error: {e}").into());
+            let msg = format!("ws response error: {e}");
+            web_sys::console::warn_1(&msg.clone().into());
+            // ClientError frames have no per-tx routing info, so any
+            // in-flight delegate `OneshotRx` would otherwise hang
+            // forever waiting on a response that will never come (the
+            // user-visible symptom was "asking delegate for
+            // identity…" stuck on boot). Fail every awaiting future
+            // with the same reason so the call site bubbles it up to
+            // the status line. False positives are acceptable —
+            // worst case is a spurious retry on the next reconnect.
+            pending.borrow_mut().fail_all(msg);
             return;
         }
     };

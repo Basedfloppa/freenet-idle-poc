@@ -127,6 +127,15 @@ pub enum DelegateRequest {
         name_or_id: String,
         now_ms: u64,
     },
+    /// Read the persisted UI prefs blob (display name + theme).
+    /// Returns `[UiPrefs::default()`] if nothing's stored yet.
+    LoadUiPrefs,
+    /// Replace the persisted UI prefs blob with the supplied one.
+    /// Sandbox iframes default to a "null" origin which breaks
+    /// localStorage persistence across reloads (manifest-driven
+    /// `allow-same-origin` opt-in is being reverted upstream), so the
+    /// authoritative copy lives next to the inventory on the node.
+    SaveUiPrefs { prefs: UiPrefs },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -170,5 +179,30 @@ pub enum DelegateResponse {
         #[serde(with = "byte_array_64")]
         signature: [u8; SIG_LEN],
     },
+    /// Reply to `LoadUiPrefs` / `SaveUiPrefs` — the canonical prefs
+    /// snapshot held by the delegate.
+    UiPrefs(UiPrefs),
     Error(String),
+}
+
+/// Cosmetic / non-game state persisted on the delegate so it survives
+/// browser localStorage being unavailable inside the sandboxed
+/// webapp iframe. Loaded once on connect, written on user changes.
+///
+/// Every field is an `Option<_>` so `Default` is "no preference"
+/// (frontend falls back to its own defaults), and so a future field
+/// addition stays backward-compatible via `#[serde(default)]` on
+/// the wire.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UiPrefs {
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub theme: Option<String>,
+    /// `Some(true)` once the player has completed (or skipped) the
+    /// first-run onboarding wizard. Loaded on connect; the wizard
+    /// stays open until either the response confirms `true` or the
+    /// user clicks through and saves `true` themselves.
+    #[serde(default)]
+    pub tutorial_dismissed: Option<bool>,
 }

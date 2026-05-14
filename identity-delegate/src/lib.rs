@@ -129,6 +129,11 @@ impl DelegateInterface for IdentityDelegate {
                     Err(e) => AppResponse::Error(e),
                 }
             }
+            AppRequest::LoadUiPrefs => AppResponse::UiPrefs(state::load_ui_prefs(ctx)),
+            AppRequest::SaveUiPrefs { prefs } => match state::save_ui_prefs(ctx, &prefs) {
+                Ok(()) => AppResponse::UiPrefs(prefs),
+                Err(e) => AppResponse::Error(e),
+            },
         };
 
         let out_envelope = DelegateEnvelopeOut {

@@ -57,6 +57,14 @@ pub struct Core {
     pub contract_key: Option<ContractKey>,
     pub delegate_key: DelegateKey,
     pub status: String,
+    /// Flipped to `true` once `freenet::actions::ui_prefs::load_ui_prefs_once`
+    /// has merged the delegate's persisted display name / theme /
+    /// tutorial flag into Core. Heartbeats are gated on this so the
+    /// first presence publish ships the player's actual name instead
+    /// of the cold-load `DEFAULT_NAME` placeholder — without this,
+    /// the leaderboard briefly shows `"player"` for returning users
+    /// every reload.
+    pub prefs_loaded: bool,
     /// Currently-visible section. UI-only state; the delegate has
     /// no notion of tabs.
     pub current_tab: Tab,
@@ -146,21 +154,9 @@ pub fn ingest_inventory(c: &mut Core, inv: Inventory) {
 
 /// How many steps in the first-visit wizard.
 pub const ONBOARDING_STEPS: u8 = 4;
-const ONBOARDING_STORAGE_KEY: &str = "freenet-idle-onboarded";
 
-/// True if the user has previously dismissed the onboarding wizard
-/// (or completed it). Falls back to "show wizard" if storage is
-/// unreachable — a fresh viewer is a more useful default than a
-/// silently-skipped intro.
-pub fn onboarding_dismissed() -> bool {
-    let Some(window) = web_sys::window() else { return false };
-    let Ok(Some(storage)) = window.local_storage() else { return false };
-    matches!(storage.get_item(ONBOARDING_STORAGE_KEY), Ok(Some(v)) if v == "1")
-}
-
-pub fn dismiss_onboarding() {
-    let Some(window) = web_sys::window() else { return };
-    if let Ok(Some(storage)) = window.local_storage() {
-        let _ = storage.set_item(ONBOARDING_STORAGE_KEY, "1");
-    }
-}
+// `onboarding_dismissed` / `dismiss_onboarding` (localStorage
+// key `freenet-idle-onboarded`) retired — the sandboxed iframe's
+// null origin makes localStorage reload-ephemeral. The dismissed
+// flag now lives in `UiPrefs.tutorial_dismissed` on the delegate
+// and is loaded via `freenet::actions::ui_prefs::load_ui_prefs_once`.

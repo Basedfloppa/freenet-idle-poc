@@ -15,6 +15,7 @@ pub mod gear;
 pub mod seed;
 pub mod messaging;
 pub mod shop;
+pub mod ui_prefs;
 
 pub use area::*;
 pub use battle::*;
@@ -24,3 +25,4 @@ pub use gear::*;
 pub use seed::*;
 pub use messaging::*;
 pub use shop::*;
+pub use ui_prefs::*;

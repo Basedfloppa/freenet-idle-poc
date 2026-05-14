@@ -221,6 +221,19 @@ async fn connect_inner(
     }
     bump.set(now_ms());
 
+    // Pull persistent UI prefs (display name + theme) from the
+    // delegate's secret store. Fire-and-forget — the player can
+    // already interact with the app on the defaults while this
+    // settles; the merge into Core is via the spawned task itself.
+    // localStorage is unreliable inside the sandboxed iframe (null
+    // origin → no reload-persistence), so the delegate is the only
+    // place these survive a refresh.
+    crate::freenet::actions::ui_prefs::load_ui_prefs_once(
+        core.clone(),
+        pending.clone(),
+        bump.clone(),
+    );
+
     // Presence contract — only subscribe when configured. Same
     // optional shape as mailbox/guilds. In single-player mode the
     // app skips this block entirely: no World Boss, no leaderboard.
