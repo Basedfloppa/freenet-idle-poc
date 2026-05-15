@@ -50,6 +50,31 @@ pub fn now_ms() -> u64 {
     js_sys::Date::now() as u64
 }
 
+/// Webapp contract id parsed out of `window.location.pathname` when the
+/// page is served from a freenet gateway under
+/// `/v1/contract/web/<id>/...`. Returns `None` for trunk dev (the URL
+/// is just `/`) or any other off-gateway host. The id is the same one
+/// captured in `frontend/prod-webapp-id.txt` at publish time and acts
+/// as the load-bearing identifier for which build of the webapp is
+/// currently being served — `fdev website publish` rotates it on every
+/// re-publish (and on every contracts/delegate change), so showing it
+/// in the UI gives the user a visible cue when the running version
+/// shifts.
+pub fn webapp_contract_id() -> Option<String> {
+    let win = web_sys::window()?;
+    let pathname = win.location().pathname().ok()?;
+    let marker = "/v1/contract/web/";
+    let start = pathname.find(marker)? + marker.len();
+    let rest = &pathname[start..];
+    let end = rest.find('/').unwrap_or(rest.len());
+    let id = rest[..end].trim();
+    if id.is_empty() {
+        None
+    } else {
+        Some(id.to_string())
+    }
+}
+
 pub fn ws_url() -> String {
     // Priority:
     //   1. `?ws=…` query param  — shareable explicit override

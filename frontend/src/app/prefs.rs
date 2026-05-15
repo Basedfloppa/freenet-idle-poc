@@ -1,7 +1,9 @@
 //! User preferences — visual theme + the JSON blob persisted in
 //! localStorage covering sync cadence, HP-pause threshold,
-//! publish-on-mission toggle, leaderboard filters, and the WS URL
-//! override.
+//! publish-on-mission toggle, leaderboard filters, the WS URL
+//! override, and the active UI locale.
+
+use super::i18n::{detect_browser_locale, Locale};
 
 /// Visual themes available in Settings. The id goes into the
 /// `data-theme` attribute on `<html>`; `style.css` reads it via a
@@ -113,6 +115,18 @@ pub struct UserPrefs {
     /// a page reload (or a forced reconnect).
     #[serde(default)]
     pub ws_url_override: String,
+    /// Active UI locale. Persisted alongside the other knobs so a
+    /// player's language choice survives reloads even when the
+    /// delegate's `UiPrefs` round-trip hasn't completed yet. New
+    /// installations seed this from the browser's
+    /// `navigator.language` via `detect_browser_locale` — see
+    /// `Default` impl below.
+    #[serde(default = "default_locale")]
+    pub locale: Locale,
+}
+
+fn default_locale() -> Locale {
+    detect_browser_locale()
 }
 
 fn default_sync_cadence() -> SyncCadence {
@@ -131,6 +145,7 @@ impl Default for UserPrefs {
             hide_pubkey: false,
             hide_stale_players: false,
             ws_url_override: String::new(),
+            locale: default_locale(),
         }
     }
 }

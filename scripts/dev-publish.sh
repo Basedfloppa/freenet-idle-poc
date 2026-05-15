@@ -133,6 +133,18 @@ if [[ -z "$DELEGATE_KEY" ]]; then
     echo "[dev-publish] could not parse delegate key"; exit 1
 fi
 
+# Stage the versioned delegate WASM into the frontend so trunk's
+# copy-file rule picks it up and bundles it into dist/. The frontend
+# fetches this at startup and auto-registers the delegate on the
+# local node — required for self-hosted users whose nodes don't
+# have the delegate pre-installed (delegates are NOT replicated
+# through the DHT, only contracts are). `fdev publish ... delegate`
+# above still runs because it's the only way to register on remote
+# nodes you don't control; auto-register handles the rest.
+cp "$HERE/identity-delegate/build/freenet/identity_delegate" \
+   "$HERE/frontend/identity_delegate.wasm"
+echo "[dev-publish] copied identity_delegate to frontend/identity_delegate.wasm"
+
 ###############################################################################
 # write dev-keys.json — trunk's copy-file directive picks it up and
 # the watcher triggers a hot-reload of the browser tab. Field names

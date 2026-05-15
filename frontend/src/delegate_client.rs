@@ -11,12 +11,16 @@ use std::rc::Rc;
 
 use freenet_stdlib::client_api::{ClientRequest, DelegateRequest};
 use freenet_stdlib::prelude::{
-    ApplicationMessage, CodeHash, DelegateKey, InboundDelegateMsg, Parameters,
+    ApplicationMessage, CodeHash, DelegateContainer, DelegateKey, InboundDelegateMsg, Parameters,
 };
 use shared::{
     DelegateEnvelopeIn, DelegateEnvelopeOut, DelegateRequest as AppRequest,
     DelegateResponse as AppResponse,
 };
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::JsFuture;
+use web_sys::js_sys::{ArrayBuffer, Uint8Array};
+use web_sys::Response;
 
 use crate::ws_shim::WsShim;
 
@@ -103,6 +107,104 @@ pub fn parse_delegate_key(key_b58: &str, code_hash_b58: &str) -> Result<Delegate
         .try_into()
         .map_err(|_| "delegate code hash must be 32 bytes".to_string())?;
     Ok(DelegateKey::new(key_arr, CodeHash::from(&code_arr)))
+}
+
+/// Fetch the versioned delegate WASM that `dev-publish.sh` /
+/// `prod-publish.sh` staged into `frontend/dist/` and register it on
+/// whichever node is currently serving the page.
+///
+/// Delegates are NOT replicated through the DHT — only contracts are
+/// — so a self-hosted user who opens the webapp on their own fresh
+/// node would otherwise hang forever on "asking delegate for
+/// identity…" because the delegate they're trying to call doesn't
+/// exist locally. This function closes that gap.
+///
+/// Called from the **probe-failed** path in `reconnect.rs`: a probe
+/// `GetPubkey` is sent first, and only on its failure (typical
+/// missing-delegate symptom) does the caller invoke this function
+/// and retry. Steady-state nodes that already have the delegate
+/// pay zero overhead — no fetch, no register, no extra WS round-
+/// trip per (re)connect.
+///
+/// Fire-and-forget at the WS layer: `WsShim::send` returns once the
+/// bytes are on the socket; we do not await a response frame. The
+/// node processes WS messages from a single client in arrival order,
+/// so the `GetPubkey` retry the caller sends next is guaranteed to
+/// see the registration completed first. If the WS pipeline ever
+/// switches to out-of-order delivery, this assumption breaks and
+/// we'd need an explicit ACK channel — flagged here so the
+/// invariant is reviewable.
+///
+/// Trunk dev mode falls through: when the page is served on
+/// `:9003` and the operator hasn't run `dev-publish.sh`, the asset is
+/// absent and the fetch returns 404. We log + skip, deferring to the
+/// existing manual-publish flow (`fdev publish ... delegate`) that
+/// dev workflow already requires.
+pub async fn ensure_delegate_registered(ws: WsCell) -> Result<(), String> {
+    let bytes = match fetch_bundled_delegate_wasm().await {
+        Ok(b) => b,
+        Err(e) => {
+            // Don't fail the whole connect — let the existing GetPubkey
+            // path surface a node-side "delegate not found" error if the
+            // node truly doesn't have it. This keeps trunk dev (asset
+            // absent) and "operator already registered via fdev" paths
+            // working identically.
+            web_sys::console::warn_1(
+                &format!("[delegate-register] skipping auto-register: {e}").into(),
+            );
+            return Ok(());
+        }
+    };
+
+    // The on-disk artefact written by `fdev build --package-type
+    // delegate` is the versioned encoding (8-byte BE APIVersion +
+    // 32-byte code hash + raw wasm). `DelegateContainer::try_from`
+    // for `(Vec<u8>, Parameters)` parses exactly that framing, so
+    // we don't need to strip or reconstruct the header here. The
+    // empty Parameters mirrors `fdev publish delegate` — the
+    // delegate's identity is `hash(wasm) + hash(params)`, and
+    // idle-poc registers under empty params on every node.
+    let params: Parameters<'static> = Parameters::from(Vec::<u8>::new());
+    let container = DelegateContainer::try_from((bytes, &params))
+        .map_err(|e| format!("decode versioned delegate: {e}"))?;
+
+    let req = ClientRequest::DelegateOp(DelegateRequest::RegisterDelegate {
+        delegate: container,
+        cipher: DelegateRequest::DEFAULT_CIPHER,
+        nonce: DelegateRequest::DEFAULT_NONCE,
+    });
+
+    ws.borrow_mut()
+        .send(req)
+        .await
+        .map_err(|e| format!("ws send register: {e:?}"))?;
+    web_sys::console::log_1(
+        &"[delegate-register] RegisterDelegate sent (fire-and-forget)".into(),
+    );
+    Ok(())
+}
+
+async fn fetch_bundled_delegate_wasm() -> Result<Vec<u8>, String> {
+    let win = web_sys::window().ok_or("no window")?;
+    let resp_val = JsFuture::from(win.fetch_with_str("./identity_delegate.wasm"))
+        .await
+        .map_err(|e| format!("fetch: {e:?}"))?;
+    let response: Response = resp_val
+        .dyn_into()
+        .map_err(|_| "not a Response".to_string())?;
+    if !response.ok() {
+        return Err(format!("HTTP {}", response.status()));
+    }
+    let buf_promise = response
+        .array_buffer()
+        .map_err(|e| format!("array_buffer(): {e:?}"))?;
+    let buf_val = JsFuture::from(buf_promise)
+        .await
+        .map_err(|e| format!("array_buffer body: {e:?}"))?;
+    let buf: ArrayBuffer = buf_val
+        .dyn_into()
+        .map_err(|_| "not an ArrayBuffer".to_string())?;
+    Ok(Uint8Array::new(&buf).to_vec())
 }
 
 pub async fn call(

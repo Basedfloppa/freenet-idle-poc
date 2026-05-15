@@ -5,17 +5,18 @@
 //! sub-views composed from `widgets`.
 
 use shared::{
-    area_of, form_name, form_slot_mask, form_sprite, format_si, level_of, plot_tuple,
-    shop_buy_price, skill_blurb, skill_buy_price, skill_name, PresencePayload, PubKey,
+    area_of, form_slot_mask, form_sprite, format_si, level_of,
+    shop_buy_price, skill_buy_price, PresencePayload, PubKey,
     AREAS, CONSUMABLE_FIREBALL, CONSUMABLE_POTION, ENCOUNTERS_PER_MISSION,
     FIREBALL_BOSS_DAMAGE, FIREBALL_PRICE, MISSION_DAMAGE, MISSION_ESSENCE, MISSION_GOLD,
     POTION_PRICE, SKILL_DRAGON_SCALES, SKILL_FELINE_GRACE, SKILL_SLIME_BODY,
-    SKILL_STEED_HEART, SLOT_COUNT, SLOT_NAMES, STATUS_ADVENTURING, STATUS_DEFEATED,
+    SKILL_STEED_HEART, SLOT_COUNT, STATUS_ADVENTURING, STATUS_DEFEATED,
     STATUS_FOCUSING, STATUS_RECOVERING, WHEAT_PER_GOLD,
 };
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
+use super::i18n_shared;
 use crate::freenet::actions::{
     auto_equip_once, buy_gear_once, buy_item_once, buy_skill_once, equip_gear_once,
     export_seed_once, forge_upgrade_once, guild_op_once, queue_battle_action_once,
@@ -24,15 +25,30 @@ use crate::freenet::actions::{
     use_consumable_once, work_farm_once,
 };
 use crate::game::derived::{
-    area_of_name, attack_from, current_chapter, defence_from, equipped_bonuses, max_hp_from,
+    area_of_name, attack_from, defence_from, equipped_bonuses, max_hp_from,
     player_speed_evasion, status_code, status_text, world_boss_state, xp_in_level,
 };
 
 use super::core::{ingest_inventory, Core, ONBOARDING_STEPS};
+use super::i18n::{locale_code, locale_from_code, Locale, MessageId};
+
+/// Read the live `Locale` from a borrowed `CoreCell`. Used inside
+/// closures (confirm dialogs, callbacks) that fire *after* render
+/// returns — we can't capture the locale value because it might
+/// change mid-session, and we can't reach into the rendered DOM
+/// for it either. `Locale::default()` is the fallback if the core
+/// isn't initialised yet (in practice the closures only fire after
+/// the core is alive, so the fallback is just a type-system stub).
+fn locale_for_confirm(core: &CoreCell) -> Locale {
+    core.borrow()
+        .as_ref()
+        .map(|c| c.prefs.locale)
+        .unwrap_or_default()
+}
 use super::util::DEFAULT_WS;
 use super::prefs::{apply_theme, clear_all_prefs, save_prefs, SyncCadence, THEMES};
 use super::types::{Tab, ToggleField};
-use super::util::{now_ms, truncate};
+use super::util::{now_ms, truncate, webapp_contract_id};
 use super::widgets::{
     render_area_card, render_battle_queue, render_battle_stage, render_catchup_banner,
     render_combat_history, render_debug_overlay, render_equipped_slot, render_mailbox_panel,
@@ -74,6 +90,7 @@ pub fn render_core(
                 pending.clone(),
                 bump.clone(),
                 Some(new_name),
+                None,
                 None,
                 None,
             );
@@ -179,12 +196,7 @@ pub fn render_core(
             Callback::from(move |_: MouseEvent| {
                 let win = match web_sys::window() { Some(w) => w, None => return };
                 let confirmed = win
-                    .confirm_with_message(&format!(
-                        "Disband \"{guild_name}\"?\n\nThis removes the guild entirely and \
-                         every member loses their membership immediately. Only you (the \
-                         current leader) can do this; if you change your mind, just don't \
-                         click OK.",
-                    ))
+                    .confirm_with_message(&locale_for_confirm(&core).confirm_disband_guild(&guild_name))
                     .unwrap_or(false);
                 if !confirmed { return; }
                 guild_op_once(
@@ -440,6 +452,41 @@ pub fn render_core(
                     None,
                     Some(theme_id.to_string()),
                     None,
+                    None,
+                );
+                bump.set(now_ms());
+            })
+        }
+    };
+
+    // Locale picker callback factory. Mirrors mk_theme_cb: writes the
+    // chosen locale to `UserPrefs.locale` (localStorage, for instant
+    // re-render before the network round-trip lands) AND fires off a
+    // `save_ui_prefs_once` so the delegate stores it next to the
+    // theme. The delegate copy is what survives a fresh browser or a
+    // cleared cache — localStorage in the sandboxed null-origin
+    // iframe doesn't.
+    let mk_locale_cb = {
+        let core = core_cell.clone();
+        let pending = pending.clone();
+        let bump = bump.clone();
+        move |code: &'static str| {
+            let core = core.clone();
+            let pending = pending.clone();
+            let bump = bump.clone();
+            Callback::from(move |_: MouseEvent| {
+                if let Some(c) = core.borrow_mut().as_mut() {
+                    c.prefs.locale = locale_from_code(code);
+                    save_prefs(&c.prefs);
+                }
+                crate::freenet::actions::ui_prefs::save_ui_prefs_once(
+                    core.clone(),
+                    pending.clone(),
+                    bump.clone(),
+                    None,
+                    None,
+                    None,
+                    Some(code.to_string()),
                 );
                 bump.set(now_ms());
             })
@@ -523,12 +570,7 @@ pub fn render_core(
             // gate for a destructive op without modal infrastructure.
             let win = match web_sys::window() { Some(w) => w, None => return };
             let confirmed = win
-                .confirm_with_message(
-                    "Reset all inventory progress?\n\n\
-                     Your identity (pubkey) stays the same — leaderboards \
-                     keep recognizing you — but every counter, item, skill, \
-                     ending, and achievement goes back to zero.",
-                )
+                .confirm_with_message(locale_for_confirm(&core).confirm_reset_progress())
                 .unwrap_or(false);
             if confirmed {
                 reset_inventory_once(core.clone(), pending.clone(), bump.clone());
@@ -545,24 +587,21 @@ pub fn render_core(
             // memory clicks, then dispatch the RPC.
             let win = match web_sys::window() { Some(w) => w, None => return };
             let confirmed = win
-                .confirm_with_message(
-                    "Reveal your Ed25519 seed?\n\n\
-                     Anyone holding it can impersonate you. Only paste it \
-                     into trusted backup storage; never into chat or screenshots.",
-                )
+                .confirm_with_message(locale_for_confirm(&core).confirm_reveal_seed())
                 .unwrap_or(false);
             if !confirmed { return }
             let core_for_cb = core.clone();
             let bump_for_cb = bump.clone();
             export_seed_once(core.clone(), pending.clone(), move |result| {
                 if let Some(c) = core_for_cb.borrow_mut().as_mut() {
+                    let loc = c.prefs.locale;
                     match result {
                         Ok(seed) => {
                             c.exported_seed_hex = Some(hex::encode(seed));
-                            c.status = "seed exported — copy and hide promptly".into();
+                            c.status = loc.status_seed_exported().to_string();
                         }
                         Err(e) => {
-                            c.status = format!("export failed: {e}");
+                            c.status = loc.fmt_status_seed_export_failed(&e);
                         }
                     }
                 }
@@ -640,6 +679,7 @@ pub fn render_core(
                     None,
                     None,
                     Some(true),
+                    None,
                 );
             }
             bump.set(now_ms());
@@ -660,6 +700,7 @@ pub fn render_core(
                 None,
                 None,
                 Some(true),
+                None,
             );
             bump.set(now_ms());
         })
@@ -717,16 +758,24 @@ pub fn render_core(
     }
     rows.sort_by(|a, b| b.1.gold.cmp(&a.1.gold).then(a.1.name.cmp(&b.1.name)));
 
+    let locale = c.prefs.locale;
     let publish_age = c
         .last_published_ms
-        .map(|ms| format!("{}s ago", (now.saturating_sub(ms)) / 1000))
-        .unwrap_or_else(|| "never".into());
+        .map(|ms| locale.fmt_seconds_ago(now.saturating_sub(ms) / 1000))
+        .unwrap_or_else(|| locale.term_never().to_string());
 
     let pubkey_text = my
-        .map(|pk| format!("pubkey (from delegate): {}", crate::short_id(&pk)))
-        .unwrap_or_else(|| "pubkey: pending delegate response".into());
+        .map(|pk| match locale {
+            Locale::En => format!("pubkey (from delegate): {}", crate::short_id(&pk)),
+            Locale::Ru => format!("ключ (от делегата): {}", crate::short_id(&pk)),
+        })
+        .unwrap_or_else(|| locale.tr(MessageId::TermPubkeyPending).to_string());
 
-    let auto_label = if c.inventory.auto_run_enabled { "auto: on" } else { "auto: off" };
+    let auto_label = if c.inventory.auto_run_enabled {
+        locale.tr(MessageId::BtnAutoOn)
+    } else {
+        locale.tr(MessageId::BtnAutoOff)
+    };
     let mission_disabled = my.is_none() || c.mission_in_flight;
 
     let inv = &c.inventory;
@@ -734,7 +783,14 @@ pub fn render_core(
     let hp_max = max_hp_from(inv);
     let atk = attack_from(inv);
     let def = defence_from(inv);
-    let (chap_no, chap_title, chap_body) = current_chapter(inv);
+    // Chapter copy is rendered in two tab arms (Farm + WorldMap); the
+    // strings are owned `String`s and each arm consumes them into
+    // `Html`, so we keep two clone-friendly copies up here rather than
+    // calling `chapter()` twice (a tiny double allocation versus a
+    // borrow-checker dance).
+    let (chap_no, chap_title, chap_body) = i18n_shared::chapter(locale, inv);
+    let chap_body_farm = chap_body.clone();
+    let chap_body_map = chap_body;
     let area = area_of(inv.current_area);
     let _mission_gold = MISSION_GOLD.saturating_mul(area.gold_mult);
     let mission_essence = MISSION_ESSENCE.saturating_mul(area.essence_mult);
@@ -751,28 +807,57 @@ pub fn render_core(
         STATUS_RECOVERING => "pill recovering",
         _ => "pill idle",
     };
-    let _ = area_of_name;
+    // Localised pill text. status_text returns an English &'static str
+    // from the shared crate (used by non-UI consumers too); the i18n
+    // layer remaps it via status_code → MessageId in the frontend.
+    // (`locale` was bound earlier alongside publish_age/auto_label.)
+    let status_pill_text = match status_code(c) {
+        STATUS_DEFEATED => locale.tr(MessageId::PillDefeated),
+        STATUS_FOCUSING => locale.tr(MessageId::PillFocusing),
+        STATUS_ADVENTURING => locale.tr(MessageId::PillAdventuring),
+        STATUS_RECOVERING => locale.tr(MessageId::PillRecovering),
+        _ => locale.tr(MessageId::PillReady),
+    };
+    let _ = (area_of_name, status_text);
 
     html! {
         <main>
             { render_toasts(&c.toasts, now) }
-            { render_onboarding(c.onboarding_step, on_onboarding_next, on_onboarding_skip) }
+            { render_onboarding(locale, c.onboarding_step, on_onboarding_next, on_onboarding_skip) }
             <header class="page-head">
                 <div class="title-row">
                     <h1>{ "Freenet Idle PoC" }</h1>
-                    <span class={status_pill_cls}>{ status_text(c) }</span>
+                    {
+                        // Show the webapp contract id (short prefix) when
+                        // served from a gateway — visible cue for which
+                        // release is running. Full id available via the
+                        // title attribute for copy/paste / diagnostics.
+                        // Hidden in trunk dev mode (page on :9003) where
+                        // the URL doesn't carry a contract id.
+                        if let Some(id) = webapp_contract_id() {
+                            let short = id.chars().take(8).collect::<String>();
+                            html! {
+                                <span class="webapp-version" title={id.clone()}>
+                                    { "v " }{ short }
+                                </span>
+                            }
+                        } else {
+                            html! {}
+                        }
+                    }
+                    <span class={status_pill_cls}>{ status_pill_text }</span>
                     <a class="repo-link"
                        href="https://github.com/Basedfloppa/freenet-idle-poc"
                        target="_blank"
                        rel="noopener noreferrer">
-                        { "source ↗" }
+                        { locale.tr(MessageId::SourceLink) }
                     </a>
                 </div>
                 <p class="status">{ &c.status }</p>
             </header>
 
             <nav class="top-actions">
-                { for top_actions().iter().map(|(icon, label, tab)| {
+                { for top_actions(locale).iter().map(|(icon, label, tab)| {
                     let is_active = c.current_tab == *tab;
                     let cls = if is_active { "icon-btn active" } else { "icon-btn" };
                     html! {
@@ -794,19 +879,14 @@ pub fn render_core(
             { match c.current_tab {
                 Tab::Farm => html! {
                     <>
-                        { render_catchup_banner(&inv.last_catchup) }
+                        { render_catchup_banner(locale, &inv.last_catchup) }
                         {
                             if inv.mission_count == 0 {
                                 html! {
                                     <section class="panel tutorial">
-                                        <h2>{ "welcome, wanderer" }</h2>
-                                        <p>
-                                            { "Click " }<strong>{ "Run Mission" }</strong>
-                                            { " to fight the area's enemy. Every 5 wins drop gear (manage at the Shop tab), every 13 wins drop a potion, every 19 a fireball." }
-                                        </p>
-                                        <p class="muted small">
-                                            { "Take damage in combat? HP regenerates over time, or use a potion to heal instantly. Pick a different battlefield from the World Map when you out-level the current one." }
-                                        </p>
+                                        <h2>{ locale.tr(MessageId::PanelTutorialWelcome) }</h2>
+                                        <p>{ locale.tr(MessageId::TutorialBody1) }</p>
+                                        <p class="muted small">{ locale.tr(MessageId::TutorialBody2) }</p>
                                     </section>
                                 }
                             } else {
@@ -815,25 +895,25 @@ pub fn render_core(
                         }
                         <section class="grid-3">
                             <article class="panel stats">
-                                <h2>{ "hero" }</h2>
+                                <h2>{ locale.tr(MessageId::PanelHero) }</h2>
                                 <div class="stat-row">
-                                    <label>{ "Name " }
+                                    <label>{ format!("{} ", locale.tr(MessageId::StatName)) }
                                         <input type="text" value={c.name.clone()} oninput={on_name} />
                                     </label>
                                 </div>
                                 <table class="statgrid">
                                     <tbody>
                                         <tr>
-                                            <th>{"Form"}</th>
+                                            <th>{ locale.tr(MessageId::StatForm) }</th>
                                             <td class="num">
                                                 <span class="form-name">
-                                                    { format!("{} {}", form_sprite(inv.current_form), form_name(inv.current_form)) }
+                                                    { format!("{} {}", form_sprite(inv.current_form), i18n_shared::form_name(locale, inv.current_form)) }
                                                 </span>
                                             </td>
                                         </tr>
-                                        <tr><th>{"Level"}</th><td class="num">{ lvl }</td></tr>
+                                        <tr><th>{ locale.tr(MessageId::StatLevel) }</th><td class="num">{ lvl }</td></tr>
                                         <tr>
-                                            <th>{"XP"}</th>
+                                            <th>{ locale.tr(MessageId::StatXp) }</th>
                                             <td class="num">
                                                 <div class="hp-mini">
                                                     <span>{ format!("{} / {}", format_si(xp_cur), format_si(xp_req)) }</span>
@@ -844,7 +924,7 @@ pub fn render_core(
                                             </td>
                                         </tr>
                                         <tr>
-                                            <th>{"HP"}</th>
+                                            <th>{ locale.tr(MessageId::StatHp) }</th>
                                             <td class="num">
                                                 <div class="hp-mini">
                                                     <span>{ format!("{} / {hp_max}", inv.current_hp) }</span>
@@ -859,10 +939,10 @@ pub fn render_core(
                                                 </div>
                                             </td>
                                         </tr>
-                                        <tr><th>{"Attack"}</th><td class="num">{ atk }</td></tr>
-                                        <tr><th>{"Defence"}</th><td class="num">{ def }</td></tr>
-                                        <tr><th>{"Speed"}</th><td class="num">{ p_speed }</td></tr>
-                                        <tr><th>{"Evasion"}</th><td class="num">{ format!("{p_evasion}%") }</td></tr>
+                                        <tr><th>{ locale.tr(MessageId::StatAttack) }</th><td class="num">{ atk }</td></tr>
+                                        <tr><th>{ locale.tr(MessageId::StatDefence) }</th><td class="num">{ def }</td></tr>
+                                        <tr><th>{ locale.tr(MessageId::StatSpeed) }</th><td class="num">{ p_speed }</td></tr>
+                                        <tr><th>{ locale.tr(MessageId::StatEvasion) }</th><td class="num">{ format!("{p_evasion}%") }</td></tr>
                                     </tbody>
                                 </table>
                                 { if c.prefs.hide_pubkey { html! {} } else {
@@ -877,7 +957,7 @@ pub fn render_core(
                                     // the static emojis only for the actual visual.
                                     // Action row (Run Mission + auto) stays put.
                                     if let Some(battle) = inv.current_battle.as_ref() {
-                                        render_battle_stage(battle, inv, hp_max)
+                                        render_battle_stage(locale, battle, inv, hp_max)
                                     } else {
                                         html! {
                                             <div class="stage">
@@ -896,16 +976,16 @@ pub fn render_core(
                                             disabled={mission_disabled || inv.current_battle.is_some()}
                                             title={
                                                 if inv.current_battle.is_some() {
-                                                    "fight in progress — wait for the current battle to end"
+                                                    locale.tr(MessageId::TipFightInProgress)
                                                 } else { "" }
                                             }>
-                                        { "Run Mission" }
+                                        { locale.tr(MessageId::BtnRunMission) }
                                     </button>
                                     <button onclick={on_toggle_auto}
                                             disabled={my.is_none()}
                                             title={
                                                 if inv.current_battle.is_some() {
-                                                    "auto toggle still works during a fight — the new setting takes effect once the current battle ends"
+                                                    locale.tr(MessageId::TipAutoToggleMidFight)
                                                 } else { "" }
                                             }>
                                         { auto_label }
@@ -917,99 +997,100 @@ pub fn render_core(
                                     // can react without losing the auto / Run
                                     // controls.
                                     if let Some(battle) = inv.current_battle.as_ref() {
-                                        render_battle_queue(battle, inv)
+                                        render_battle_queue(locale, battle, inv)
                                     } else {
                                         html! {
                                             <p class="tooltip muted">
                                                 {
-                                                    if mission_damage == 0 {
-                                                        format!("Mission in {}: up to {} encounters, ~{} essence per win, no World Boss contribution from this area — gold scales by enemy",
-                                                                area.name, ENCOUNTERS_PER_MISSION, mission_essence)
-                                                    } else {
-                                                        format!("Mission in {}: up to {} encounters, ~{} essence + ~{} boss damage per win — gold scales by enemy",
-                                                                area.name, ENCOUNTERS_PER_MISSION, mission_essence, mission_damage)
-                                                    }
+                                                    locale.fmt_mission_summary(
+                                                        i18n_shared::area_name(locale, area),
+                                                        ENCOUNTERS_PER_MISSION,
+                                                        mission_essence,
+                                                        mission_damage,
+                                                    )
                                                 }
                                             </p>
                                         }
                                     }
                                 }
                                 <p class="muted small">
-                                    { format!("last publish: {publish_age} · published gold {} · published damage {}",
-                                              format_si(c.last_published.gold), format_si(c.last_published.boss_damage)) }
+                                    { locale.fmt_last_publish(
+                                        &publish_age,
+                                        &format_si(c.last_published.gold),
+                                        &format_si(c.last_published.boss_damage),
+                                    ) }
                                 </p>
-                                { render_combat_history(&inv.combat_history) }
+                                { render_combat_history(locale, &inv.combat_history) }
                             </article>
 
                             <article class="panel equipment">
-                                <h2>{ "equipment" }</h2>
-                                <p class="muted small">{ format!("equipped bonus: +{eq_atk} atk · +{eq_def} def · +{eq_hp} hp") }</p>
+                                <h2>{ locale.tr(MessageId::PanelEquipment) }</h2>
+                                <p class="muted small">{ locale.fmt_equipped_bonus(eq_atk, eq_def, eq_hp) }</p>
                                 <div class="action-row">
                                     <button
                                         onclick={on_auto_equip}
                                         disabled={inv.unequipped.is_empty()}
-                                        title="walk every slot and equip the highest stat-sum piece you own"
+                                        title={locale.tr(MessageId::TipAutoEquipBest)}
                                     >
-                                        { "Auto-Equip Best" }
+                                        { locale.tr(MessageId::BtnAutoEquipBest) }
                                     </button>
                                 </div>
                                 <div class="slot-grid">
-                                    { for (0..SLOT_COUNT).map(|i| render_equipped_slot(i, inv, &mk_unequip_cb)) }
+                                    { for (0..SLOT_COUNT).map(|i| render_equipped_slot(locale, i, inv, &mk_unequip_cb)) }
                                 </div>
                                 {
                                     if stash_count == 0 {
                                         html! {
                                             <p class="muted small">
-                                                { format!("no spare loot yet — gear drops every {} missions", shared::GEAR_DROP_EVERY) }
+                                                { locale.fmt_no_spare_loot(shared::GEAR_DROP_EVERY as u32) }
                                             </p>
                                         }
                                     } else {
                                         html! {
                                             <p class="muted small">
-                                                { format!("{stash_count} item{} in stash — manage at the Shop tab",
-                                                          if stash_count == 1 { "" } else { "s" }) }
+                                                { locale.fmt_stash_count(stash_count) }
                                             </p>
                                         }
                                     }
                                 }
-                                <h3>{ "consumables" }</h3>
+                                <h3>{ locale.tr(MessageId::PanelConsumables) }</h3>
                                 // Single canonical position. Clicks route via
                                 // `mk_use_cb`: idle → `UseConsumable`, mid-battle
                                 // → `QueueBattleAction` (queue for next turn).
                                 // The tooltip flips to match the routed semantic.
                                 <div class="consumable-row">
                                     <span class="consumable">
-                                        <span class="name">{ "Potion" }</span>
+                                        <span class="name">{ locale.tr(MessageId::ItemPotion) }</span>
                                         <span class="qty">{ inv.potions }</span>
                                         <button
                                             onclick={on_use_potion}
                                             disabled={inv.potions == 0}
                                             title={
                                                 if inv.current_battle.is_some() {
-                                                    "queue: heal to full on the next combat turn"
+                                                    locale.tr(MessageId::TipPotionQueue)
                                                 } else {
-                                                    "heals HP fully"
+                                                    locale.tr(MessageId::TipPotionIdle)
                                                 }
                                             }
                                         >
-                                            { "Use" }
+                                            { locale.tr(MessageId::BtnUse) }
                                         </button>
                                     </span>
                                     <span class="consumable">
-                                        <span class="name">{ "Fireball" }</span>
+                                        <span class="name">{ locale.tr(MessageId::ItemFireball) }</span>
                                         <span class="qty">{ inv.fireballs }</span>
                                         <button
                                             onclick={on_use_fireball}
                                             disabled={inv.fireballs == 0}
                                             title={
                                                 if inv.current_battle.is_some() {
-                                                    "queue: bonus damage on the next combat turn".to_string()
+                                                    locale.tr(MessageId::TipFireballQueue).to_string()
                                                 } else {
-                                                    format!("deals {FIREBALL_BOSS_DAMAGE} damage to the World Boss")
+                                                    locale.fmt_fireball_idle(FIREBALL_BOSS_DAMAGE)
                                                 }
                                             }
                                         >
-                                            { "Use" }
+                                            { locale.tr(MessageId::BtnUse) }
                                         </button>
                                     </span>
                                 </div>
@@ -1017,44 +1098,47 @@ pub fn render_core(
                         </section>
 
                         <section class="panel plot">
-                            <h2>{ "The Plot So Far…" }</h2>
+                            <h2>{ locale.tr(MessageId::PanelPlotSoFar) }</h2>
                             {
                                 if inv.plot_seed != 0 {
-                                    let (home, mac, vil, mthd, dest) = plot_tuple(inv.plot_seed);
+                                    let (home, mac, vil, mthd, dest) = i18n_shared::plot_tuple_l10n(locale, inv.plot_seed);
                                     html! {
                                         <p class="plot-backstory">
-                                            { format!(
-                                                "You were abandoned in the {home} as a baby. Then one day, the {mac} disappeared! Surely the {vil} used the {mthd} to take it! Now you must journey to the {dest} to confront them."
-                                            ) }
+                                            { locale.fmt_plot_backstory(home, mac, vil, mthd, dest) }
                                         </p>
                                     }
                                 } else {
                                     html! {}
                                 }
                             }
-                            <p class="chapter-no muted">{ format!("Chapter {chap_no}") }</p>
-                            <p>{ chap_body }</p>
+                            <p class="chapter-no muted">{ locale.fmt_chapter(chap_no as u64) }</p>
+                            <p>{ chap_body_farm }</p>
                         </section>
 
                         <section class="panel boss">
-                            <h2>{ "World Boss" }</h2>
+                            <h2>{ locale.tr(MessageId::PanelWorldBoss) }</h2>
                             <div class="hp-bar">
                                 <div class="hp-fill" style={format!("width: {boss_pct}%")}></div>
                             </div>
                             <p class="muted">
-                                { format!("Era {boss_era} · {} / {} HP — {} total damage from {} players",
-                                          format_si(boss_hp), format_si(boss_max_hp), format_si(total_dmg), rows.len()) }
+                                { locale.fmt_boss_summary(
+                                    boss_era,
+                                    &format_si(boss_hp),
+                                    &format_si(boss_max_hp),
+                                    &format_si(total_dmg),
+                                    rows.len(),
+                                ) }
                             </p>
                         </section>
 
                         <section class="panel resources">
-                            <h2>{ "resources" }</h2>
+                            <h2>{ locale.tr(MessageId::PanelResources) }</h2>
                             <table class="inventory">
                                 <tbody>
-                                    <tr><th>{"gold"}</th><td class="num">{ format_si(inv.gold) }</td></tr>
-                                    <tr><th>{"essence"}</th><td class="num">{ format_si(inv.essence) }</td></tr>
-                                    <tr><th>{"missions"}</th><td class="num">{ format_si(inv.mission_count) }</td></tr>
-                                    <tr><th>{"boss damage"}</th><td class="num">{ format_si(inv.boss_damage) }</td></tr>
+                                    <tr><th>{ locale.tr(MessageId::ResGold) }</th><td class="num">{ format_si(inv.gold) }</td></tr>
+                                    <tr><th>{ locale.tr(MessageId::ResEssence) }</th><td class="num">{ format_si(inv.essence) }</td></tr>
+                                    <tr><th>{ locale.tr(MessageId::ResMissions) }</th><td class="num">{ format_si(inv.mission_count) }</td></tr>
+                                    <tr><th>{ locale.tr(MessageId::ResBossDamage) }</th><td class="num">{ format_si(inv.boss_damage) }</td></tr>
                                 </tbody>
                             </table>
                         </section>
@@ -1063,44 +1147,47 @@ pub fn render_core(
                 Tab::WorldMap => html! {
                     <>
                         <section class="panel world-map">
-                            <h2>{ "world map" }</h2>
+                            <h2>{ locale.tr(MessageId::PanelWorldMap) }</h2>
                             <p class="muted small">
-                                { format!("currently farming: {} · level {lvl}", area.name) }
+                                { locale.fmt_currently_farming(i18n_shared::area_name(locale, area), lvl) }
                             </p>
                             <div class="area-grid">
-                                { for AREAS.iter().map(|a| render_area_card(a, inv.current_area, lvl, &mk_set_area_cb)) }
+                                { for AREAS.iter().map(|a| render_area_card(locale, a, inv.current_area, lvl, &mk_set_area_cb)) }
                             </div>
                         </section>
                         <section class="panel plot">
-                            <h2>{ "The Plot So Far…" }</h2>
-                            <p class="chapter-no muted">{ format!("Chapter {chap_no}") }</p>
-                            <p>{ chap_body }</p>
+                            <h2>{ locale.tr(MessageId::PanelPlotSoFar) }</h2>
+                            <p class="chapter-no muted">{ locale.fmt_chapter(chap_no as u64) }</p>
+                            <p>{ chap_body_map }</p>
                         </section>
                     </>
                 },
                 Tab::Shop => html! {
                     <>
                         <section class="panel shop">
-                            <h2>{ "shop" }</h2>
+                            <h2>{ locale.tr(MessageId::PanelShop) }</h2>
                             <p class="muted small">
-                                { format!("gold balance: {} · potions: {} · fireballs: {}",
-                                          format_si(inv.gold), inv.potions, inv.fireballs) }
+                                { locale.fmt_shop_balance(
+                                    &format_si(inv.gold),
+                                    &inv.potions.to_string(),
+                                    &inv.fireballs.to_string(),
+                                ) }
                             </p>
                             <div class="shop-items">
                                 <div class="shop-item">
-                                    <span class="name">{ "Potion" }</span>
+                                    <span class="name">{ locale.tr(MessageId::ItemPotion) }</span>
                                     <span class="desc muted">
-                                        { "fully heals your HP" }
+                                        { locale.tr(MessageId::PotionShopDesc) }
                                     </span>
                                     <button
                                         onclick={on_buy_potion}
                                         disabled={inv.gold < POTION_PRICE}
                                     >
-                                        { format!("Buy ({POTION_PRICE}g)") }
+                                        { locale.fmt_buy_gold(POTION_PRICE) }
                                     </button>
                                 </div>
                                 <div class="shop-item">
-                                    <span class="name">{ "Fireball" }</span>
+                                    <span class="name">{ locale.tr(MessageId::ItemFireball) }</span>
                                     <span class="desc muted">
                                         { format!("{FIREBALL_BOSS_DAMAGE} instant boss damage") }
                                     </span>
@@ -1108,28 +1195,28 @@ pub fn render_core(
                                         onclick={on_buy_fireball}
                                         disabled={inv.gold < FIREBALL_PRICE}
                                     >
-                                        { format!("Buy ({FIREBALL_PRICE}g)") }
+                                        { locale.fmt_buy_gold(FIREBALL_PRICE) }
                                     </button>
                                 </div>
                             </div>
                         </section>
                         <section class="panel stash">
-                            <h2>{ format!("stash ({})", inv.unequipped.len()) }</h2>
+                            <h2>{ locale.fmt_stash_header(inv.unequipped.len()) }</h2>
                             <p class="muted small">
-                                { "items grouped by slot — equip to wear, sell back to the merchant for tier-priced gold" }
+                                { locale.tr(MessageId::ShopStashDesc) }
                             </p>
-                            { render_stash_grouped(inv, &mk_equip_cb, &mk_sell_cb, &mk_forge_cb) }
+                            { render_stash_grouped(locale, inv, &mk_equip_cb, &mk_sell_cb, &mk_forge_cb) }
                         </section>
 
                         <section class="panel buy-gear">
-                            <h2>{ "buy gear" }</h2>
+                            <h2>{ locale.tr(MessageId::PanelBuyGear) }</h2>
                             <p class="muted small">
-                                { "pre-rolled equipment at the smithy. each click of Buy adds one piece of the requested slot+tier to your stash. legendary (T4) only via forge or drop." }
+                                { locale.tr(MessageId::ShopBuyGearDesc) }
                             </p>
                             <table class="buy-grid">
                                 <thead>
                                     <tr>
-                                        <th>{"slot"}</th>
+                                        <th>{ locale.tr(MessageId::ColSlot) }</th>
                                         <th class="num">{ format!("T1 ({}g)", shop_buy_price(1)) }</th>
                                         <th class="num">{ format!("T2 ({}g)", shop_buy_price(2)) }</th>
                                         <th class="num">{ format!("T3 ({}g)", shop_buy_price(3)) }</th>
@@ -1143,7 +1230,7 @@ pub fn render_core(
                                         } else { "" };
                                         html! {
                                             <tr class={row_cls}>
-                                                <th>{ SLOT_NAMES[slot_idx] }</th>
+                                                <th>{ i18n_shared::slot_name(locale, slot_idx) }</th>
                                                 { for [1u8, 2, 3].iter().map(|t| {
                                                     let price = shop_buy_price(*t);
                                                     html! {
@@ -1151,7 +1238,7 @@ pub fn render_core(
                                                             <button
                                                                 onclick={mk_buy_gear_cb(slot_u8, *t)}
                                                                 disabled={inv.gold < price}
-                                                            >{ "Buy" }</button>
+                                                            >{ locale.tr(MessageId::BtnBuy) }</button>
                                                         </td>
                                                     }
                                                 }) }
@@ -1163,9 +1250,9 @@ pub fn render_core(
                         </section>
 
                         <section class="panel sage">
-                            <h2>{ "the sage (buy skills)" }</h2>
+                            <h2>{ locale.tr(MessageId::PanelSage) }</h2>
                             <p class="muted small">
-                                { "the Sage trades permanent skill lore for essence. Veteran/Champion still come from level milestones — those aren't for sale." }
+                                { locale.tr(MessageId::ShopSageDesc) }
                             </p>
                             <ul class="skill-shop">
                                 { for [SKILL_SLIME_BODY, SKILL_FELINE_GRACE, SKILL_DRAGON_SCALES, SKILL_STEED_HEART].iter().map(|sid| {
@@ -1174,14 +1261,14 @@ pub fn render_core(
                                     let cant_afford = inv.essence < price;
                                     let disabled = owned || cant_afford;
                                     let label = if owned {
-                                        "owned".to_string()
+                                        locale.tr(MessageId::TermOwned).to_string()
                                     } else {
-                                        format!("Buy ({price}e)")
+                                        locale.fmt_buy_essence(price)
                                     };
                                     html! {
                                         <li class={if owned { "skill-shop-row owned" } else { "skill-shop-row" }}>
-                                            <span class="skill-name">{ skill_name(*sid) }</span>
-                                            <span class="skill-blurb muted small">{ skill_blurb(*sid) }</span>
+                                            <span class="skill-name">{ i18n_shared::skill_name(locale, *sid) }</span>
+                                            <span class="skill-blurb muted small">{ i18n_shared::skill_blurb(locale, *sid) }</span>
                                             <button onclick={mk_buy_skill_cb(*sid)} disabled={disabled}>{ label }</button>
                                         </li>
                                     }
@@ -1190,33 +1277,35 @@ pub fn render_core(
                         </section>
 
                         <section class="panel farm">
-                            <h2>{ "farm" }</h2>
+                            <h2>{ locale.tr(MessageId::PanelFarm) }</h2>
                             <p class="muted small">
-                                { format!("safe non-combat income. each Work click yields +1 wheat; the merchant pays 1 gold per {} wheat.", WHEAT_PER_GOLD) }
+                                { locale.tr(MessageId::ShopFarmDesc) }
                             </p>
                             <p>
-                                { format!("wheat: {} · would sell for {}g",
-                                          format_si(inv.wheat), format_si(inv.wheat / WHEAT_PER_GOLD)) }
+                                { locale.fmt_wheat_balance(
+                                    &format_si(inv.wheat),
+                                    &format_si(inv.wheat / WHEAT_PER_GOLD),
+                                ) }
                             </p>
                             <div class="action-row">
-                                <button onclick={on_work_farm}>{ "Work the Farm (+1 wheat)" }</button>
+                                <button onclick={on_work_farm}>{ locale.tr(MessageId::BtnWorkFarm) }</button>
                                 <button
                                     onclick={on_sell_all_wheat}
                                     disabled={inv.wheat < WHEAT_PER_GOLD}
-                                    title={format!("convert all wheat to gold at 1:{}", WHEAT_PER_GOLD)}
+                                    title={locale.fmt_sell_wheat_tooltip(WHEAT_PER_GOLD as u64)}
                                 >
-                                    { "Sell All Wheat" }
+                                    { locale.tr(MessageId::BtnSellAllWheat) }
                                 </button>
                             </div>
                         </section>
                         <section class="panel resources">
-                            <h2>{ "resources" }</h2>
+                            <h2>{ locale.tr(MessageId::PanelResources) }</h2>
                             <table class="inventory">
                                 <tbody>
-                                    <tr><th>{"gold"}</th><td class="num">{ format_si(inv.gold) }</td></tr>
-                                    <tr><th>{"essence"}</th><td class="num">{ format_si(inv.essence) }</td></tr>
-                                    <tr><th>{"potions"}</th><td class="num">{ inv.potions }</td></tr>
-                                    <tr><th>{"fireballs"}</th><td class="num">{ inv.fireballs }</td></tr>
+                                    <tr><th>{ locale.tr(MessageId::ResGold) }</th><td class="num">{ format_si(inv.gold) }</td></tr>
+                                    <tr><th>{ locale.tr(MessageId::ResEssence) }</th><td class="num">{ format_si(inv.essence) }</td></tr>
+                                    <tr><th>{ locale.tr(MessageId::ResPotions) }</th><td class="num">{ inv.potions }</td></tr>
+                                    <tr><th>{ locale.tr(MessageId::ResFireballs) }</th><td class="num">{ inv.fireballs }</td></tr>
                                 </tbody>
                             </table>
                         </section>
@@ -1228,19 +1317,19 @@ pub fn render_core(
                     html! {
                         <>
                             <section class="panel">
-                                <h2>{ "guilds" }</h2>
+                                <h2>{ locale.tr(MessageId::PanelGuilds) }</h2>
                                 <p class="muted small">
-                                    { "Cooperative groups — early scaffolding. Create one, others can join by id. Each player is in at most one guild; leaders auto-handoff on leave." }
+                                    { locale.tr(MessageId::GuildsPanelDesc) }
                                 </p>
                                 {
                                     if !configured {
                                         html! {
                                             <p class="muted small">
-                                                { "Guilds contract not configured. Publish " }
+                                                { locale.tr(MessageId::GuildsContractMissing) }
                                                 <code>{ "guilds-contract" }</code>
-                                                { " via " }
+                                                { locale.tr(MessageId::GuildsViaScript) }
                                                 <code>{ "scripts/dev-publish.sh" }</code>
-                                                { " (extension WIP) or override the keys in " }
+                                                { locale.tr(MessageId::GuildsContractMissingTail) }
                                                 <code>{ "dev-keys.json" }</code>
                                                 { "." }
                                             </p>
@@ -1248,18 +1337,18 @@ pub fn render_core(
                                     } else if my_guild_idx.is_none() {
                                         html! {
                                             <div class="guild-create">
-                                                <h3>{ "create a guild" }</h3>
+                                                <h3>{ locale.tr(MessageId::PanelCreateGuild) }</h3>
                                                 <div class="action-row">
                                                     <input
                                                         type="text"
-                                                        placeholder="guild name (≤ 32 bytes)"
+                                                        placeholder={locale.tr(MessageId::GuildNamePlaceholder)}
                                                         value={c.new_guild_name_input.clone()}
                                                         oninput={on_guild_name_input}
                                                     />
                                                     <button class="primary"
                                                             onclick={on_create_guild}
                                                             disabled={c.new_guild_name_input.trim().is_empty()}>
-                                                        { "Create" }
+                                                        { locale.tr(MessageId::BtnCreate) }
                                                     </button>
                                                 </div>
                                             </div>
@@ -1271,22 +1360,29 @@ pub fn render_core(
                                         let is_leader = my.map(|pk| g.leader == pk).unwrap_or(false);
                                         let leave_cb = mk_guild_leave_cb(id_hex.clone());
                                         let disband_cb = mk_guild_disband_cb(id_hex, g.name.clone());
+                                        let leader_label = if is_leader {
+                                            locale.tr(MessageId::TermYouLeader).to_string()
+                                        } else {
+                                            crate::short_id(&g.leader)
+                                        };
                                         html! {
                                             <div class="guild-mine">
-                                                <h3>{ format!("you are in: {}", g.name) }</h3>
+                                                <h3>{ locale.fmt_you_are_in_guild(&g.name) }</h3>
                                                 <p class="muted small">
-                                                    { format!("members: {} / {} · leader: {}",
-                                                              g.members.len(), shared::MAX_GUILD_MEMBERS,
-                                                              if is_leader { "you".to_string() } else { crate::short_id(&g.leader) }) }
+                                                    { locale.fmt_guild_meta(
+                                                        g.members.len(),
+                                                        shared::MAX_GUILD_MEMBERS,
+                                                        &leader_label,
+                                                    ) }
                                                 </p>
                                                 <div class="action-row">
-                                                    <button onclick={leave_cb}>{ "Leave guild" }</button>
+                                                    <button onclick={leave_cb}>{ locale.tr(MessageId::BtnLeaveGuild) }</button>
                                                     {
                                                         if is_leader {
                                                             html! {
                                                                 <button onclick={disband_cb}
-                                                                        title="leader-only: delete the guild for everyone">
-                                                                    { "Disband guild" }
+                                                                        title={locale.tr(MessageId::TipDisbandLeader)}>
+                                                                    { locale.tr(MessageId::BtnDisbandGuild) }
                                                                 </button>
                                                             }
                                                         } else { html! {} }
@@ -1298,10 +1394,10 @@ pub fn render_core(
                                 }
                             </section>
                             <section class="panel">
-                                <h2>{ format!("directory ({})", c.guilds.guilds.len()) }</h2>
+                                <h2>{ locale.fmt_directory(c.guilds.guilds.len()) }</h2>
                                 {
                                     if c.guilds.guilds.is_empty() {
-                                        html! { <p class="muted small">{ "(no guilds yet — be the first)" }</p> }
+                                        html! { <p class="muted small">{ locale.tr(MessageId::GuildsEmptyList) }</p> }
                                     } else {
                                         html! {
                                             <ul class="guild-list">
@@ -1321,11 +1417,11 @@ pub fn render_core(
                                                             </span>
                                                             {
                                                                 if is_mine {
-                                                                    html! { <span class="badge live">{ "you" }</span> }
+                                                                    html! { <span class="badge live">{ locale.tr(MessageId::TermYouBadge) }</span> }
                                                                 } else {
                                                                     html! {
                                                                         <button onclick={join_cb} disabled={!can_join}>
-                                                                            { "Join" }
+                                                                            { locale.tr(MessageId::BtnJoin) }
                                                                         </button>
                                                                     }
                                                                 }
@@ -1342,17 +1438,47 @@ pub fn render_core(
                     }
                 },
                 Tab::Achievements => crate::app::tabs::render_achievements_tab(
-                    inv, now, boss_era, boss_hp, boss_max_hp, boss_pct, total_dmg, &rows,
+                    locale, inv, now, boss_era, boss_hp, boss_max_hp, boss_pct, total_dmg, &rows,
                 ),
-                Tab::Help => crate::app::tabs::render_help_tab(),
+                Tab::Help => crate::app::tabs::render_help_tab(locale),
                 Tab::Settings => html! {
                     <>
                         <section class="panel settings">
-                            <h2>{ "settings" }</h2>
+                            <h2>{ locale.tr(MessageId::SettingsTitle) }</h2>
 
-                            <h3>{ "theme" }</h3>
+                            <h3>{ locale.tr(MessageId::SettingsLanguage) }</h3>
+                            <div class="theme-picker">
+                                { for [Locale::En, Locale::Ru].iter().map(|loc| {
+                                    let is_active = c.prefs.locale == *loc;
+                                    let cls = if is_active { "theme-btn active" } else { "theme-btn" };
+                                    // Render the label in its OWN
+                                    // locale (so "English" / "Русский"
+                                    // always read natively, never get
+                                    // translated). This matches the
+                                    // convention common UI toolkits use
+                                    // for language pickers — users
+                                    // search for their language by its
+                                    // endonym.
+                                    let label = loc.tr(if *loc == Locale::Ru {
+                                        MessageId::LocaleRussian
+                                    } else {
+                                        MessageId::LocaleEnglish
+                                    });
+                                    html! {
+                                        <button
+                                            class={cls}
+                                            onclick={mk_locale_cb(locale_code(*loc))}
+                                            disabled={is_active}
+                                        >
+                                            { label }
+                                        </button>
+                                    }
+                                }) }
+                            </div>
+
+                            <h3>{ locale.tr(MessageId::SettingsTheme) }</h3>
                             <p class="muted small">
-                                { "Pick a palette. Saved to this browser's local storage; takes effect immediately and persists across reloads." }
+                                { locale.tr(MessageId::SettingsThemeDesc) }
                             </p>
                             <div class="theme-picker">
                                 { for THEMES.iter().map(|(id, label)| {
@@ -1370,9 +1496,9 @@ pub fn render_core(
                                 }) }
                             </div>
 
-                            <h3>{ "sync cadence" }</h3>
+                            <h3>{ locale.tr(MessageId::SettingsSyncCadence) }</h3>
                             <p class="muted small">
-                                { "How often the webapp talks to your local node. Aggressive = snappier leaderboard, more node traffic. Easy = lighter, but the contract prunes you after 60 s of silence so don't go past that." }
+                                { locale.tr(MessageId::SettingsCadenceDesc) }
                             </p>
                             <div class="theme-picker">
                                 { for [SyncCadence::Aggressive, SyncCadence::Normal, SyncCadence::Easy].iter().map(|cad| {
@@ -1380,21 +1506,21 @@ pub fn render_core(
                                     let cls = if is_active { "theme-btn active" } else { "theme-btn" };
                                     html! {
                                         <button class={cls} onclick={mk_cadence_cb(*cad)} disabled={is_active}>
-                                            { cad.label() }
+                                            { locale.fmt_sync_cadence(*cad) }
                                         </button>
                                     }
                                 }) }
                             </div>
 
-                            <h3>{ "auto-mission" }</h3>
+                            <h3>{ locale.tr(MessageId::SettingsAutoMission) }</h3>
                             <p class="muted small">
-                                { "Pause the auto-loop when HP drops below this fraction of your maximum. 0% keeps the old behaviour — only stop at 0 HP. Higher values save you from losing HP/forms/consumables to a string of bad rolls." }
+                                { locale.tr(MessageId::SettingsAutoMissionDesc) }
                             </p>
                             <div class="theme-picker">
                                 { for [0u8, 25, 50].iter().map(|pct| {
                                     let is_active = c.prefs.auto_pause_hp_pct == *pct;
                                     let cls = if is_active { "theme-btn active" } else { "theme-btn" };
-                                    let label = if *pct == 0 { "0% (only at 0 HP)".to_string() } else { format!("{pct}%") };
+                                    let label = locale.fmt_hp_pause_label(*pct);
                                     html! {
                                         <button class={cls} onclick={mk_hp_pause_cb(*pct)} disabled={is_active}>
                                             { label }
@@ -1403,21 +1529,21 @@ pub fn render_core(
                                 }) }
                             </div>
 
-                            <h3>{ "publish behavior" }</h3>
+                            <h3>{ locale.tr(MessageId::SettingsPublishBehavior) }</h3>
                             <label class="setting-toggle">
                                 <input
                                     type="checkbox"
                                     checked={c.prefs.reactive_publish}
                                     onclick={mk_toggle_cb(ToggleField::ReactivePublish)}
                                 />
-                                { " publish immediately after a mission (in addition to the periodic heartbeat)" }
+                                { locale.tr(MessageId::SettingsPublishCheckbox) }
                             </label>
 
-                            <h3>{ "identity & backup" }</h3>
+                            <h3>{ locale.tr(MessageId::SettingsIdentityBackup) }</h3>
                             <p class="muted small">
                                 {
                                     if c.prefs.hide_pubkey {
-                                        "pubkey hidden (toggle in advanced to reveal)".to_string()
+                                        locale.tr(MessageId::TermPubkeyHidden).to_string()
                                     } else {
                                         pubkey_text.clone()
                                     }
@@ -1429,21 +1555,21 @@ pub fn render_core(
                                         let hex = hex::encode(pk);
                                         html! { <p><code class="pubkey-full">{ hex }</code></p> }
                                     } else {
-                                        html! { <p><span class="muted">{ "pubkey pending..." }</span></p> }
+                                        html! { <p><span class="muted">{ locale.tr(MessageId::TermPubkeyPendingShort) }</span></p> }
                                     }
                                 } else { html! {} }
                             }
                             <p class="muted small">
-                                { "Export the Ed25519 seed to move identity to another node, or wipe inventory back to a fresh-character state. " }
-                                <strong>{ "Reset progress is destructive" }</strong>
-                                { " — pubkey survives but every counter, item, skill, and ending goes to zero." }
+                                { locale.tr(MessageId::SettingsIdentityBody) }
+                                <strong>{ locale.tr(MessageId::SettingsIdentityBodyStrong) }</strong>
+                                { locale.tr(MessageId::SettingsIdentityBodyTail) }
                             </p>
                             <div class="action-row">
                                 <button onclick={on_export_seed} disabled={my.is_none()}>
-                                    { "Export seed" }
+                                    { locale.tr(MessageId::BtnExportSeed) }
                                 </button>
                                 <button onclick={on_reset_progress} disabled={my.is_none()}>
-                                    { "Reset progress" }
+                                    { locale.tr(MessageId::BtnResetProgress) }
                                 </button>
                             </div>
                             {
@@ -1451,11 +1577,11 @@ pub fn render_core(
                                     html! {
                                         <div class="seed-reveal">
                                             <p class="muted small">
-                                                { "Copy this once. Anyone with these bytes can impersonate you on the contract." }
+                                                { locale.tr(MessageId::SettingsSeedRevealWarn) }
                                             </p>
                                             <code class="pubkey-full">{ hex.clone() }</code>
                                             <div class="action-row">
-                                                <button onclick={on_hide_seed.clone()}>{ "Hide" }</button>
+                                                <button onclick={on_hide_seed.clone()}>{ locale.tr(MessageId::BtnHide) }</button>
                                             </div>
                                         </div>
                                     }
@@ -1463,9 +1589,9 @@ pub fn render_core(
                             }
 
                             <details class="settings-advanced">
-                                <summary>{ "advanced" }</summary>
+                                <summary>{ locale.tr(MessageId::SettingsAdvanced) }</summary>
                                 <p class="muted small">
-                                    { "Lower-traffic / privacy / debug switches. Defaults are fine for most players." }
+                                    { locale.tr(MessageId::SettingsAdvancedDesc) }
                                 </p>
 
                                 <label class="setting-toggle">
@@ -1474,7 +1600,7 @@ pub fn render_core(
                                         checked={c.prefs.hide_pubkey}
                                         onclick={mk_toggle_cb(ToggleField::HidePubkey)}
                                     />
-                                    { " hide pubkey (Hero panel + Settings)" }
+                                    { locale.tr(MessageId::SettingsHidePubkey) }
                                 </label>
 
                                 <label class="setting-toggle">
@@ -1483,11 +1609,11 @@ pub fn render_core(
                                         checked={c.prefs.hide_stale_players}
                                         onclick={mk_toggle_cb(ToggleField::HideStale)}
                                     />
-                                    { " hide stale players from leaderboard (last seen > 30 s ago)" }
+                                    { locale.tr(MessageId::SettingsHideStale) }
                                 </label>
 
                                 <label class="setting-text">
-                                    <span>{ "WS URL override (empty = use ?ws= or default; takes effect after page reload):" }</span>
+                                    <span>{ locale.tr(MessageId::SettingsWsOverride) }</span>
                                     <input
                                         type="text"
                                         value={c.prefs.ws_url_override.clone()}
@@ -1496,23 +1622,23 @@ pub fn render_core(
                                     />
                                 </label>
 
-                                <h3 class="advanced-subhead">{ "reset UI preferences" }</h3>
+                                <h3 class="advanced-subhead">{ locale.tr(MessageId::SettingsResetUiPrefs) }</h3>
                                 <p class="muted small">
-                                    { "Clears theme + cadence + auto-pause + advanced toggles and reloads the page. Doesn't touch your inventory — that lives on the node." }
+                                    { locale.tr(MessageId::SettingsResetUiPrefsDesc) }
                                 </p>
                                 <div class="action-row">
-                                    <button onclick={on_reset_prefs}>{ "Reset to defaults" }</button>
+                                    <button onclick={on_reset_prefs}>{ locale.tr(MessageId::BtnResetDefaults) }</button>
                                 </div>
 
-                                <h3 class="advanced-subhead">{ "mailbox (D2D test)" }</h3>
-                                { render_mailbox_panel(c, on_mailbox_self_test) }
+                                <h3 class="advanced-subhead">{ locale.tr(MessageId::SettingsMailbox) }</h3>
+                                { render_mailbox_panel(locale, c, on_mailbox_self_test) }
 
                                 { render_debug_overlay(c, now) }
                             </details>
 
-                            <h3>{ "where state lives" }</h3>
+                            <h3>{ locale.tr(MessageId::SettingsWhereStateLives) }</h3>
                             <p class="muted small">
-                                { "Local view is just a cache of what lives on the node. Reload the page — identity and inventory come straight back from the delegate. To actually delete your save, wipe `~/.config/freenet/secrets/local/<delegate-key>/` on the node." }
+                                { locale.tr(MessageId::SettingsWhereStateBody) }
                             </p>
                         </section>
                     </>

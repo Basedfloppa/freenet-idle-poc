@@ -4,6 +4,9 @@
 use shared::{AreaDef, MISSION_DAMAGE, MISSION_ESSENCE, MISSION_GOLD};
 use yew::prelude::*;
 
+use crate::app::i18n::{Locale, MessageId};
+use crate::app::i18n_shared::{area_blurb, area_name};
+
 /// Render one area as a clickable card. Three visual states:
 ///   * `current`  — the active area, button is disabled (no-op
 ///     click) and gets a highlighted border.
@@ -13,7 +16,7 @@ use yew::prelude::*;
 /// `mk_cb` is the closure factory that turns an `area_id` into a
 /// Yew `Callback`. The factory is owned by `render_core`'s scope and
 /// borrowed here so each card gets a freshly-baked callback.
-pub fn render_area_card<F>(area: &'static AreaDef, current: u8, lvl: u64, mk_cb: &F) -> Html
+pub fn render_area_card<F>(locale: Locale, area: &'static AreaDef, current: u8, lvl: u64, mk_cb: &F) -> Html
 where
     F: Fn(u8) -> Callback<MouseEvent>,
 {
@@ -31,9 +34,9 @@ where
     let cb = mk_cb(area.id);
 
     let footer = if is_current {
-        html! { <span class="area-tag current-tag">{ "active" }</span> }
+        html! { <span class="area-tag current-tag">{ locale.tr(MessageId::TermActive) }</span> }
     } else if !unlocked {
-        html! { <span class="area-tag lock-tag">{ format!("lvl {} required", area.min_level) }</span> }
+        html! { <span class="area-tag lock-tag">{ locale.fmt_lvl_required(area.min_level) }</span> }
     } else {
         let gold = MISSION_GOLD.saturating_mul(area.gold_mult);
         let ess = MISSION_ESSENCE.saturating_mul(area.essence_mult);
@@ -56,8 +59,8 @@ where
 
     html! {
         <button class={classes.join(" ")} disabled={disabled} onclick={cb}>
-            <span class="area-name">{ area.name }</span>
-            <span class="area-blurb muted">{ area.blurb }</span>
+            <span class="area-name">{ area_name(locale, area) }</span>
+            <span class="area-blurb muted">{ area_blurb(locale, area) }</span>
             { footer }
         </button>
     }

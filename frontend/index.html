@@ -25,6 +25,16 @@
          runtime so the page picks up new contract / delegate IDs
          without a Rust rebuild. -->
     <link data-trunk rel="copy-file" href="dev-keys.json" />
+    <!-- Versioned identity-delegate WASM, staged by
+         dev-publish.sh / prod-publish.sh after `fdev build`. The
+         frontend fetches it at startup and posts a
+         DelegateRequest::RegisterDelegate via the WS so self-hosted
+         users whose nodes don't have the delegate pre-installed
+         get it registered automatically. Delegates are NOT
+         replicated through the DHT — only contracts are — so this
+         is the only way to provision a fresh node without the
+         operator SSH'ing into it. -->
+    <link data-trunk rel="copy-file" href="identity_delegate.wasm" />
 </head>
 <body></body>
 </html>

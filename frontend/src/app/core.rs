@@ -13,6 +13,7 @@ use shared::{Inventory, PresencePayload, PubKey};
 
 use crate::delegate_client::{Pending, WsCell};
 
+use super::i18n_shared;
 use super::prefs::UserPrefs;
 use super::types::{Tab, Toast, MAX_TOASTS};
 use super::util::now_ms;
@@ -130,6 +131,7 @@ pub fn ingest_inventory(c: &mut Core, inv: Inventory) {
     let now = now_ms();
     let current: std::collections::BTreeSet<u8> =
         inv.achievement_unlocks.keys().copied().collect();
+    let locale = c.prefs.locale;
     match c.shown_achievements.as_mut() {
         None => {
             c.shown_achievements = Some(current);
@@ -141,8 +143,8 @@ pub fn ingest_inventory(c: &mut Core, inv: Inventory) {
                     c.toasts.remove(0);
                 }
                 c.toasts.push(Toast {
-                    label: format!("🏆 {}", shared::achievement_label(id)),
-                    body: shared::achievement_reason(id),
+                    label: format!("🏆 {}", i18n_shared::achievement_label(locale, id)),
+                    body: i18n_shared::achievement_reason(locale, id),
                     created_ms: now,
                 });
                 seen.insert(id);

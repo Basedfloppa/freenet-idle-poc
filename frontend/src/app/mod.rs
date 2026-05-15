@@ -5,6 +5,8 @@
 //! `crate::SomeType` imports keep working.
 
 pub mod core;
+pub mod i18n;
+pub mod i18n_shared;
 pub mod keys;
 pub mod prefs;
 pub mod render;
@@ -14,6 +16,12 @@ pub mod util;
 pub mod widgets;
 
 pub use core::*;
+pub use i18n::*;
+// NOTE: i18n_shared deliberately NOT glob-re-exported — its function
+// names (`form_name`, `area_name`, etc.) overlap with the same-name
+// re-exports out of the `shared` crate and would create ambiguous
+// resolution at call sites. Access it explicitly as
+// `crate::app::i18n_shared::form_name(...)`.
 pub use keys::*;
 pub use prefs::*;
 pub use render::*;

@@ -190,9 +190,12 @@ pub enum DelegateResponse {
 /// webapp iframe. Loaded once on connect, written on user changes.
 ///
 /// Every field is an `Option<_>` so `Default` is "no preference"
-/// (frontend falls back to its own defaults), and so a future field
-/// addition stays backward-compatible via `#[serde(default)]` on
-/// the wire.
+/// (frontend falls back to its own defaults). New fields are added
+/// at the **end** of the struct; older blobs serialized with bincode
+/// hit EOF on the new trailing field and fall back to the `UiPrefsV1`
+/// legacy decoder (see `delegate/state.rs::load_ui_prefs`). Bincode 1
+/// is length-prefixed and doesn't honour `#[serde(default)]` for
+/// truncated input, so the V1/V2 split is load-bearing.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UiPrefs {
     #[serde(default)]
@@ -205,4 +208,96 @@ pub struct UiPrefs {
     /// user clicks through and saves `true` themselves.
     #[serde(default)]
     pub tutorial_dismissed: Option<bool>,
+    /// UI locale short code ("en", "ru"). Persisted on the delegate
+    /// so a player's language choice survives moves between browsers
+    /// / cleared caches / sandbox null-origin localStorage wipes.
+    /// `None` = the delegate has no opinion yet (new install or
+    /// V1-blob migration); frontend keeps its own defaults until
+    /// the user picks one.
+    #[serde(default)]
+    pub locale: Option<String>,
+}
+
+/// Legacy 3-field shape used by delegate releases before `locale`
+/// was added. Kept around so `load_ui_prefs` can fall back when the
+/// stored secret was written by an older delegate build. Promotion
+/// to the current `UiPrefs` is a lossless field-by-field copy with
+/// `locale: None` — the player's first explicit picker click
+/// rewrites the blob in the new shape.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UiPrefsV1 {
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub theme: Option<String>,
+    #[serde(default)]
+    pub tutorial_dismissed: Option<bool>,
+}
+
+impl From<UiPrefsV1> for UiPrefs {
+    fn from(v: UiPrefsV1) -> Self {
+        Self {
+            display_name: v.display_name,
+            theme: v.theme,
+            tutorial_dismissed: v.tutorial_dismissed,
+            locale: None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod ui_prefs_tests {
+    use super::*;
+
+    #[test]
+    fn v1_blob_roundtrips_to_v2_with_locale_none() {
+        // Simulate an older delegate save: 3-field bincode of the
+        // legacy shape with a populated name + theme.
+        let v1 = UiPrefsV1 {
+            display_name: Some("Alice".into()),
+            theme: Some("dusk".into()),
+            tutorial_dismissed: Some(true),
+        };
+        let bytes = bincode::serialize(&v1).unwrap();
+
+        // V2 (current shape) deserialize must reject the truncated
+        // blob — bincode is length-prefixed and can't infer the
+        // missing trailing `locale` field via `#[serde(default)]`.
+        assert!(
+            bincode::deserialize::<UiPrefs>(&bytes).is_err(),
+            "V2 decode of V1 bytes must fail so the load path falls back to UiPrefsV1"
+        );
+
+        // The legacy decoder accepts it cleanly; lifting promotes
+        // every populated field and leaves `locale = None`.
+        let legacy: UiPrefsV1 = bincode::deserialize(&bytes).unwrap();
+        let promoted: UiPrefs = legacy.into();
+        assert_eq!(promoted.display_name.as_deref(), Some("Alice"));
+        assert_eq!(promoted.theme.as_deref(), Some("dusk"));
+        assert_eq!(promoted.tutorial_dismissed, Some(true));
+        assert!(promoted.locale.is_none());
+    }
+
+    #[test]
+    fn v2_blob_decodes_with_locale() {
+        let v2 = UiPrefs {
+            display_name: Some("Bob".into()),
+            theme: None,
+            tutorial_dismissed: None,
+            locale: Some("ru".into()),
+        };
+        let bytes = bincode::serialize(&v2).unwrap();
+        let round: UiPrefs = bincode::deserialize(&bytes).unwrap();
+        assert_eq!(round, v2);
+    }
+
+    #[test]
+    fn v2_default_blob_decodes_with_all_none() {
+        let bytes = bincode::serialize(&UiPrefs::default()).unwrap();
+        let round: UiPrefs = bincode::deserialize(&bytes).unwrap();
+        assert!(round.display_name.is_none());
+        assert!(round.theme.is_none());
+        assert!(round.tutorial_dismissed.is_none());
+        assert!(round.locale.is_none());
+    }
 }

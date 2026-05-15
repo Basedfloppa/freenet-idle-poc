@@ -5,6 +5,7 @@ use shared::format_si;
 use yew::prelude::*;
 
 use crate::app::core::{Core, ONBOARDING_STEPS};
+use crate::app::i18n::{Locale, MessageId};
 use crate::app::types::{Toast, TOAST_TTL_MS};
 
 /// Toast stack — fixed-position corner banners for transient
@@ -37,6 +38,7 @@ pub fn render_toasts(toasts: &[Toast], now: u64) -> Html {
 /// later. Persists "dismissed" in localStorage so it doesn't pester
 /// returning players.
 pub fn render_onboarding(
+    locale: Locale,
     step: Option<u8>,
     on_next: Callback<MouseEvent>,
     on_skip: Callback<MouseEvent>,
@@ -44,47 +46,51 @@ pub fn render_onboarding(
     let Some(step) = step else { return html! {} };
     let (title, body): (&str, Html) = match step {
         0 => (
-            "Welcome to Freenet Idle",
+            locale.tr(MessageId::OnbTitleWelcome),
             html! { <>
-                <p>{ "Your hero, inventory, and identity live on the local Freenet node — not in this browser tab. Clearing your cookies, switching browsers, or reloading the page won't lose anything." }</p>
-                <p class="muted small">{ "If the node ever rebuilds, you can back up your seed from Settings → Backup & Migration." }</p>
+                <p>{ locale.tr(MessageId::OnbBodyWelcome1) }</p>
+                <p class="muted small">{ locale.tr(MessageId::OnbBodyWelcome2) }</p>
             </> },
         ),
         1 => (
-            "The loop",
+            locale.tr(MessageId::OnbTitleLoop),
             html! { <>
-                <p>{ "Click " }<strong>{ "Run Mission" }</strong>{ " on the Farm tab. Each mission is a chain of up to 5 encounters — wins drop gear, potions, and fireballs at fixed cadences. Lose to a non-mundane enemy and you'll transform into them, permanently." }</p>
-                <p class="muted small">{ "Every form you wear leaves a permanent skill — the prestige loop." }</p>
+                <p>{ locale.tr(MessageId::OnbBodyLoop1) }</p>
+                <p class="muted small">{ locale.tr(MessageId::OnbBodyLoop2) }</p>
             </> },
         ),
         2 => (
-            "Auto-mission",
+            locale.tr(MessageId::OnbTitleAuto),
             html! { <>
-                <p>{ "Toggle " }<strong>{ "auto: on" }</strong>{ " to let the hero fight on its own. Close the tab and come back later — the delegate simulates the missions you missed (up to ~1 hour at a time) and shows a summary when you return." }</p>
-                <p class="muted small">{ "Set an HP-pause threshold in Settings if you'd rather not get auto-defeated." }</p>
+                <p>{ locale.tr(MessageId::OnbBodyAuto1) }</p>
+                <p class="muted small">{ locale.tr(MessageId::OnbBodyAuto2) }</p>
             </> },
         ),
         _ => (
-            "Tabs & Settings",
+            locale.tr(MessageId::OnbTitleTabs),
             html! { <>
-                <p>{ "🗺 " }<strong>{ "World Map" }</strong>{ " switches biomes once you out-level the current one. " }<strong>{ "🛒 Shop" }</strong>{ " buys gear and potions, sells stash, forges duplicates, and trades wheat for gold. " }<strong>{ "⚙ Settings" }</strong>{ " has themes, sync cadence, identity backup, and advanced toggles." }</p>
-                <p class="muted small">{ "Click " }<strong>{ "❔ Help" }</strong>{ " any time for the full reference." }</p>
+                <p>{ locale.tr(MessageId::OnbBodyTabs1) }</p>
+                <p class="muted small">{ locale.tr(MessageId::OnbBodyTabs2) }</p>
             </> },
         ),
     };
     let last = step + 1 >= ONBOARDING_STEPS;
-    let next_label = if last { "Start playing" } else { "Next" };
+    let next_label = if last {
+        locale.tr(MessageId::BtnStartPlaying)
+    } else {
+        locale.tr(MessageId::BtnNext)
+    };
     html! {
         <div class="onboarding-backdrop">
             <div class="onboarding-modal">
                 <p class="muted small onboarding-step">
-                    { format!("step {} / {}", step + 1, ONBOARDING_STEPS) }
+                    { locale.fmt_onboarding_step(step + 1, ONBOARDING_STEPS) }
                 </p>
                 <h2>{ title }</h2>
                 { body }
                 <div class="action-row onboarding-actions">
                     <button class="primary" onclick={on_next}>{ next_label }</button>
-                    <button onclick={on_skip}>{ "Skip intro" }</button>
+                    <button onclick={on_skip}>{ locale.tr(MessageId::BtnSkipIntro) }</button>
                 </div>
             </div>
         </div>
@@ -94,7 +100,7 @@ pub fn render_onboarding(
 /// "While you were away" banner — surfaces the delegate's offline
 /// catch-up summary when present. Disappears after the next manual
 /// mission (the delegate clears `last_catchup` in `run_mission`).
-pub fn render_catchup_banner(catchup: &Option<shared::CatchupSummary>) -> Html {
+pub fn render_catchup_banner(locale: Locale, catchup: &Option<shared::CatchupSummary>) -> Html {
     let Some(s) = catchup.as_ref() else { return html! {} };
     let elapsed_s = s.ended_ms.saturating_sub(s.started_ms) / 1000;
     let elapsed_human = if elapsed_s >= 3600 {
@@ -106,23 +112,19 @@ pub fn render_catchup_banner(catchup: &Option<shared::CatchupSummary>) -> Html {
     };
     html! {
         <section class="panel catchup">
-            <h2>{ "while you were away" }</h2>
+            <h2>{ locale.tr(MessageId::PanelWhileAway) }</h2>
             <p>
-                { format!("Auto-mode ran for {elapsed_human} ({} missions).", s.missions_won) }
-                { if s.missions_lost > 0 {
-                    format!(" {} ended in defeat.", s.missions_lost)
-                } else { String::new() } }
+                { locale.fmt_catchup_summary(&elapsed_human, s.missions_won, s.missions_lost) }
             </p>
             <p class="muted small">
-                { format!(
-                    "rewards: +{}g · +{}e · +{} XP · +{} boss damage",
-                    format_si(s.gold_gained),
-                    format_si(s.essence_gained),
-                    format_si(s.xp_gained),
-                    format_si(s.boss_damage_gained),
+                { locale.fmt_catchup_rewards(
+                    &format_si(s.gold_gained),
+                    &format_si(s.essence_gained),
+                    &format_si(s.xp_gained),
+                    &format_si(s.boss_damage_gained),
                 ) }
             </p>
-            <p class="muted small">{ "(Banner clears when you run a mission.)" }</p>
+            <p class="muted small">{ locale.tr(MessageId::CatchupClearsHint) }</p>
         </section>
     }
 }

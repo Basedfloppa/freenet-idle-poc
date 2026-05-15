@@ -25,6 +25,16 @@ frontend/dist/
 frontend/dev-keys.json
 
 # =============================================================
+# Build artefact — `dev-publish.sh` / `prod-publish.sh` copies
+# the versioned delegate WASM here after `fdev build`. The
+# frontend fetches it at startup and auto-registers the delegate
+# on the local node (Scenario B: self-hosted users whose nodes
+# don't have the delegate pre-installed). Regenerated on every
+# (re-)publish.
+# =============================================================
+frontend/identity_delegate.wasm
+
+# =============================================================
 # Logs left by `dev-watch.sh` / `trunk serve` / various tests.
 # =============================================================
 *.log

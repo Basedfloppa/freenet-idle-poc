@@ -18,6 +18,7 @@ use gloo_timers::callback::Timeout;
 use shared::{DelegateRequest as AppRequest, DelegateResponse as AppResponse, Inventory};
 use wasm_bindgen_futures::spawn_local;
 
+use crate::app::i18n::MessageId;
 use crate::delegate_client;
 use crate::freenet::contract::{handle_response, parse_contract_key};
 use crate::identity;
@@ -170,22 +171,80 @@ async fn connect_inner(
         let mut g = core.borrow_mut();
         let c = g.as_mut().ok_or("no core")?;
         c.ws = Some(ws.clone());
-        c.status = "asking delegate for identity…".into();
+        c.status = c.prefs.locale.tr(MessageId::StatusAskingDelegate).into();
     }
     bump.set(now_ms());
 
+    // Probe the delegate with `GetPubkey`. If it succeeds, the
+    // delegate is already on this node — no register-time cost.
+    // If it fails (most likely cause on a fresh self-hosted node:
+    // delegate not registered, since delegates are NOT DHT-
+    // replicated), stage the bundled WASM via
+    // `ensure_delegate_registered` and retry once. The second
+    // failure is bubbled up unchanged. This swaps the eager-
+    // register pattern for probe-then-register, eliminating
+    // 234 KB of fetch + a WS round-trip on every clean
+    // reconnect to an already-provisioned node.
     let seed = identity::random_seed_candidate();
-    let pubkey = match delegate_client::call(
+    let first_probe = delegate_client::call(
         ws.clone(),
         pending.clone(),
         &delegate_key,
-        AppRequest::GetPubkey { seed_if_missing: seed },
+        AppRequest::GetPubkey {
+            seed_if_missing: seed.clone(),
+        },
     )
-    .await?
-    {
-        AppResponse::Pubkey { pubkey } => pubkey,
-        AppResponse::Error(e) => return Err(format!("delegate: {e}")),
-        other => return Err(format!("unexpected delegate response: {other:?}")),
+    .await;
+
+    let pubkey = match first_probe {
+        Ok(AppResponse::Pubkey { pubkey }) => pubkey,
+        Ok(AppResponse::Error(e)) => return Err(format!("delegate: {e}")),
+        Ok(other) => return Err(format!("unexpected delegate response: {other:?}")),
+        Err(first_err) => {
+            web_sys::console::warn_1(
+                &format!(
+                    "[delegate] GetPubkey probe failed ({first_err}); \
+                     attempting bundled-WASM register + retry"
+                )
+                .into(),
+            );
+            {
+                let mut g = core.borrow_mut();
+                if let Some(c) = g.as_mut() {
+                    c.status = c.prefs.locale.tr(MessageId::StatusRegisteringDelegate).into();
+                }
+            }
+            bump.set(now_ms());
+
+            delegate_client::ensure_delegate_registered(ws.clone()).await?;
+
+            {
+                let mut g = core.borrow_mut();
+                if let Some(c) = g.as_mut() {
+                    c.status = c.prefs.locale.tr(MessageId::StatusAskingDelegate).into();
+                }
+            }
+            bump.set(now_ms());
+
+            // Retry GetPubkey once. The register above is fire-and-
+            // forget at the WS layer but FIFO ordering at the node
+            // means this retry lands after the register has been
+            // processed. If even the retry fails, surface the retry
+            // error (preserving the original probe-failure cause in
+            // the log above).
+            match delegate_client::call(
+                ws.clone(),
+                pending.clone(),
+                &delegate_key,
+                AppRequest::GetPubkey { seed_if_missing: seed },
+            )
+            .await?
+            {
+                AppResponse::Pubkey { pubkey } => pubkey,
+                AppResponse::Error(e) => return Err(format!("delegate: {e}")),
+                other => return Err(format!("unexpected delegate response: {other:?}")),
+            }
+        }
     };
 
     let inventory = match delegate_client::call(
@@ -216,7 +275,7 @@ async fn connect_inner(
             // toast logic establishes its baseline on this first load
             // (it intentionally does NOT toast pre-existing unlocks).
             crate::ingest_inventory(c, inventory);
-            c.status = "subscribing…".into();
+            c.status = c.prefs.locale.tr(MessageId::StatusSubscribing).into();
         }
     }
     bump.set(now_ms());

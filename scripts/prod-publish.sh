@@ -154,6 +154,18 @@ if [[ -z "$DELEGATE_KEY" ]]; then
     echo "[prod-publish] could not parse delegate key"; exit 1
 fi
 
+# Stage the versioned delegate WASM into the frontend so trunk's
+# copy-file rule bundles it into dist/. The frontend fetches this
+# at startup and auto-registers the delegate on whichever node is
+# serving the webapp — required for self-hosted users whose nodes
+# don't have the delegate pre-installed (delegates are NOT
+# replicated through the DHT). The fdev publish above still
+# registers on the target node so the very first user (the
+# publisher) doesn't hit a register-then-call race on first load.
+cp "$HERE/identity-delegate/build/freenet/identity_delegate" \
+   "$HERE/frontend/identity_delegate.wasm"
+echo "[prod-publish] copied identity_delegate to frontend/identity_delegate.wasm"
+
 ###############################################################################
 # Patch frontend/src/app/keys.rs so the compile-time defaults match
 # what we just published. The release build picks these up — even if

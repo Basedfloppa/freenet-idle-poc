@@ -18,7 +18,8 @@ use shared::{DelegateRequest as AppRequest, DelegateResponse as AppResponse, UiP
 use wasm_bindgen_futures::spawn_local;
 use yew::UseStateSetter;
 
-use crate::app::prefs::DEFAULT_NAME;
+use crate::app::i18n::{locale_code, locale_from_code};
+use crate::app::prefs::{save_prefs, DEFAULT_NAME};
 use crate::delegate_client;
 use crate::{now_ms, CoreCell, PendingCell};
 
@@ -52,6 +53,22 @@ pub fn load_ui_prefs_once(
                         if crate::app::prefs::THEMES.iter().any(|(id, _)| *id == theme) {
                             c.current_theme = theme.clone();
                             crate::app::prefs::apply_theme(&theme);
+                        }
+                    }
+                    // Locale: short code ("en" / "ru"). Apply the
+                    // delegate's saved value if it parses to a known
+                    // locale, then mirror it into the localStorage
+                    // prefs blob so reloads have the right language
+                    // even before this round-trip completes next
+                    // session. `locale_from_code` falls through to
+                    // `Locale::En` on unknown codes — we only honour
+                    // the result if the code itself was recognised
+                    // so a stale code doesn't silently downgrade
+                    // the player's pick.
+                    if let Some(code) = prefs.locale.as_deref() {
+                        if code == "en" || code == "ru" {
+                            c.prefs.locale = locale_from_code(code);
+                            save_prefs(&c.prefs);
                         }
                     }
                     // Returning players have `tutorial_dismissed = Some(true)`;
@@ -97,6 +114,7 @@ pub fn save_ui_prefs_once(
     name_override: Option<String>,
     theme_override: Option<String>,
     tutorial_dismissed_override: Option<bool>,
+    locale_override: Option<String>,
 ) {
     let (ws, delegate_key, prefs) = {
         let g = core.borrow();
@@ -125,6 +143,12 @@ pub fn save_ui_prefs_once(
                 None
             }
         });
+        // Locale: caller's explicit override wins; otherwise mirror
+        // the current Core selection so a save triggered by any
+        // other field still ships the picker state. Stored as a
+        // short code so the wire stays plain-string and doesn't
+        // need to know about the frontend's `Locale` enum.
+        let locale = locale_override.or_else(|| Some(locale_code(c.prefs.locale).to_string()));
         (
             ws,
             c.delegate_key.clone(),
@@ -132,6 +156,7 @@ pub fn save_ui_prefs_once(
                 display_name,
                 theme,
                 tutorial_dismissed,
+                locale,
             },
         )
     };

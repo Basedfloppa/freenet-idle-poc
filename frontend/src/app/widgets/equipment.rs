@@ -3,9 +3,12 @@
 
 use shared::{
     forge_essence_cost, form_slot_mask, gear_sell_price, gear_template, GearTemplate, Inventory,
-    FORGE_COUNT, SLOT_COUNT, SLOT_NAMES, TIER_COUNT,
+    FORGE_COUNT, SLOT_COUNT, TIER_COUNT,
 };
 use yew::prelude::*;
+
+use crate::app::i18n::{Locale, MessageId};
+use crate::app::i18n_shared;
 
 /// One equipment slot. Shows slot label + the equipped piece's name
 /// + stat line, with an "x" to send it back to the stash. If the
@@ -13,6 +16,7 @@ use yew::prelude::*;
 /// pants as a slime), the cell is greyed and shows "n/a"; equipping
 /// is refused by the delegate anyway.
 pub fn render_equipped_slot<F>(
+    locale: Locale,
     slot_idx: usize,
     inv: &Inventory,
     mk_unequip: &F,
@@ -21,28 +25,32 @@ where
     F: Fn(u8) -> Callback<MouseEvent>,
 {
     let slot_u8 = slot_idx as u8;
-    let slot_name = SLOT_NAMES[slot_idx];
+    let slot_name = i18n_shared::slot_name(locale, slot_idx);
     let allowed = form_slot_mask(inv.current_form)[slot_idx];
     let equipped = inv.equipped[slot_idx];
     let (value_text, stat_text, action) = match equipped {
         Some(cid) => match gear_template(cid) {
             Some(t) => (
-                t.name(),
+                i18n_shared::gear_name(locale, &t),
                 stat_blurb(&t),
                 Some(html! {
                     <button
                         class="slot-action"
-                        title="unequip — return to stash"
+                        title={locale.tr(MessageId::TipUnequipSlot)}
                         onclick={mk_unequip(slot_u8)}
                     >
                         { "✕" }
                     </button>
                 }),
             ),
-            None => ("(corrupt)".into(), "—".into(), None),
+            None => (locale.tr(MessageId::TermCorrupt).into(), "—".into(), None),
         },
-        None if !allowed => ("n/a (form)".into(), "form locks this slot".into(), None),
-        None => ("Empty".into(), "—".into(), None),
+        None if !allowed => (
+            locale.tr(MessageId::TermFormNa).into(),
+            locale.tr(MessageId::TermFormLocks).into(),
+            None,
+        ),
+        None => (locale.tr(MessageId::TermEmpty).into(), "—".into(), None),
     };
     let cls = match (equipped.is_some(), allowed) {
         (true, _) => "slot filled",
@@ -68,6 +76,7 @@ where
 /// look at the stash, equip what you want, forge duplicates into
 /// the next tier, dump the rest for gold.
 pub fn render_stash_grouped<E, S, F>(
+    locale: Locale,
     inv: &Inventory,
     mk_equip: &E,
     mk_sell: &S,
@@ -114,12 +123,12 @@ where
                 Some(html! {
                     <div class="stash-group">
                         <h4 class="stash-group-name">
-                            { format!("{} ({})", SLOT_NAMES[slot_idx], items.len()) }
+                            { format!("{} ({})", i18n_shared::slot_name(locale, slot_idx), items.len()) }
                         </h4>
                         <div class="stash-items">
                             { for distinct.iter().map(|cid| {
                                 let count = *counts_by_id.get(cid).unwrap_or(&0);
-                                render_stash_row(*cid, count, inv.essence, mk_equip, mk_sell, mk_forge)
+                                render_stash_row(locale, *cid, count, inv.essence, mk_equip, mk_sell, mk_forge)
                             }) }
                         </div>
                     </div>
@@ -135,6 +144,7 @@ where
 /// AND the item isn't already at the max tier; greyed out if
 /// essence is insufficient.
 pub fn render_stash_row<E, S, F>(
+    locale: Locale,
     catalog_id: u16,
     owned_count: usize,
     essence: u64,
@@ -164,12 +174,12 @@ where
     html! {
         <div class={format!("stash-item tier-{}", t.tier)}>
             <span class="stash-name">
-                { t.name() }
+                { i18n_shared::gear_name(locale, &t) }
                 { if count_text.is_empty() { html!{} } else { html!{<span class="stash-count">{count_text}</span>} } }
             </span>
             <span class="stash-tier">{ format!("T{}", t.tier) }</span>
             <span class="stash-stats muted small">{ stat_blurb(&t) }</span>
-            <button class="stash-equip" onclick={mk_equip(catalog_id)}>{ "equip" }</button>
+            <button class="stash-equip" onclick={mk_equip(catalog_id)}>{ locale.tr(MessageId::BtnEquip) }</button>
             <button class="stash-sell" onclick={mk_sell(catalog_id)} title={format!("sell for {sell_price} gold")}>
                 { format!("sell {sell_price}g") }
             </button>
@@ -189,7 +199,7 @@ where
                         </button>
                     }
                 } else {
-                    html! { <span class="stash-forge-na muted small">{ "max tier" }</span> }
+                    html! { <span class="stash-forge-na muted small">{ locale.tr(MessageId::TermMaxTier) }</span> }
                 }
             }
         </div>

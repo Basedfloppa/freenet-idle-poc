@@ -61,4 +61,5 @@ features = [
     "IdbVersionChangeEvent",
     "DomException",
     "Event",
+    "Navigator",
 ]

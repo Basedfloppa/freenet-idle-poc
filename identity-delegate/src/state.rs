@@ -9,8 +9,8 @@ use ed25519_dalek::SigningKey;
 use freenet_stdlib::prelude::*;
 
 use shared::{
-    Inventory, InventoryV10, InventoryV9, InventoryWire, UiPrefs, FORM_HUMAN, IDENTITY_SECRET_ID,
-    INVENTORY_SECRET_ID, STARTING_HP, UI_PREFS_SECRET_ID,
+    Inventory, InventoryV10, InventoryV9, InventoryWire, UiPrefs, UiPrefsV1, FORM_HUMAN,
+    IDENTITY_SECRET_ID, INVENTORY_SECRET_ID, STARTING_HP, UI_PREFS_SECRET_ID,
 };
 
 use crate::derived::max_hp_of;
@@ -65,14 +65,28 @@ pub fn load_inventory_raw(ctx: &mut DelegateCtx) -> Inventory {
     Inventory::default()
 }
 
-/// Load UI prefs (display name + theme). Missing or malformed →
-/// `UiPrefs::default()`. Frontend falls back to its own defaults
-/// when a field is `None`.
+/// Load UI prefs (display name + theme + locale + tutorial flag).
+/// Missing or malformed → `UiPrefs::default()`. Frontend falls back
+/// to its own defaults when a field is `None`.
+///
+/// Backward-compatibility: bincode 1 is length-prefixed and refuses
+/// to apply `#[serde(default)]` to truncated input, so blobs written
+/// by older delegate builds (3-field `UiPrefsV1`, no `locale`) fail
+/// the current 4-field decode. We try the current shape first and
+/// fall back to the legacy decoder, lifting it to `UiPrefs` with
+/// `locale = None`. The next `SaveUiPrefs` rewrites the blob in the
+/// new shape, so V1 fallback is a one-shot migration per user.
 pub fn load_ui_prefs(ctx: &mut DelegateCtx) -> UiPrefs {
     let Some(bytes) = ctx.get_secret(UI_PREFS_SECRET_ID) else {
         return UiPrefs::default();
     };
-    bincode::deserialize(&bytes).unwrap_or_default()
+    if let Ok(prefs) = bincode::deserialize::<UiPrefs>(&bytes) {
+        return prefs;
+    }
+    if let Ok(legacy) = bincode::deserialize::<UiPrefsV1>(&bytes) {
+        return legacy.into();
+    }
+    UiPrefs::default()
 }
 
 /// Persist UI prefs. The whole blob is replaced each call — callers

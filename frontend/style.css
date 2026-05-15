@@ -277,6 +277,24 @@ h3 { font-size: 0.82em; color: var(--fg-muted); margin: 1em 0 0.4em; text-transf
     border-color: var(--fg-muted);
 }
 
+/* Webapp contract id badge — shows short prefix of the contract under
+   which the running webapp is served. Full id in tooltip. Same shape
+   as .repo-link so the title-row stays visually balanced. */
+.webapp-version {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.75em;
+    color: var(--fg-muted);
+    border: 1px solid var(--border-soft);
+    padding: 2px 9px;
+    border-radius: 12px;
+    cursor: help;
+    user-select: all;
+}
+.webapp-version:hover {
+    color: var(--fg);
+    border-color: var(--fg-muted);
+}
+
 /* status pills */
 .pill {
     font-size: 0.75em;

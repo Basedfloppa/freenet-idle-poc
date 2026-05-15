@@ -7,12 +7,14 @@ use shared::{
 use yew::prelude::*;
 
 use crate::app::core::Core;
+use crate::app::i18n::{Locale, MessageId};
+use crate::app::i18n_shared;
 use crate::app::util::short_id;
 
-pub fn render_combat_history(history: &[EncounterLog]) -> Html {
+pub fn render_combat_history(locale: Locale, history: &[EncounterLog]) -> Html {
     if history.is_empty() {
         return html! {
-            <p class="muted small">{ "no encounters yet — Run Mission to fight" }</p>
+            <p class="muted small">{ locale.tr(MessageId::BattleNoEncounters) }</p>
         };
     }
     // Show up to 8 latest (newest first).
@@ -24,10 +26,17 @@ pub fn render_combat_history(history: &[EncounterLog]) -> Html {
         .map(|e| {
             let won = e.outcome == COMBAT_OUTCOME_WIN;
             let cls = if won { "encounter win" } else { "encounter loss" };
-            let verdict = if won { "win" } else { "defeat" };
+            let verdict = if won {
+                locale.tr(MessageId::TermWin)
+            } else {
+                locale.tr(MessageId::TermDefeat)
+            };
             let enemy_name = enemy_def(e.enemy_id)
-                .map(|d| d.name)
-                .unwrap_or("unknown");
+                .map(|d| i18n_shared::enemy_name(locale, d))
+                .unwrap_or(match locale {
+                    Locale::En => "unknown",
+                    Locale::Ru => "неизвестно",
+                });
             let detail = if won {
                 format!(
                     "+{}g · turn {} · dealt {} · taken {} · hp {} → {}",
@@ -36,7 +45,7 @@ pub fn render_combat_history(history: &[EncounterLog]) -> Html {
                 )
             } else {
                 let blurb = enemy_def(e.enemy_id)
-                    .map(|d| d.death_blurb)
+                    .map(|d| i18n_shared::enemy_death_blurb(locale, d))
                     .unwrap_or("…");
                 format!("dealt {} · taken {} · {}", e.dmg_dealt, e.dmg_taken, blurb)
             };
@@ -56,6 +65,7 @@ pub fn render_combat_history(history: &[EncounterLog]) -> Html {
 }
 
 pub fn row_view(
+    locale: Locale,
     rank: usize,
     pk: &PubKey,
     p: &PresencePayload,
@@ -67,9 +77,9 @@ pub fn row_view(
     let live = age_s < 30;
     let badge_cls = if live { "badge live" } else { "badge stale" };
     let badge_text = if is_me {
-        "you".to_string()
+        locale.tr(MessageId::TermYouBadge).to_string()
     } else if live {
-        "live".into()
+        locale.tr(MessageId::TermLive).to_string()
     } else {
         format!("{age_s}s")
     };
@@ -81,7 +91,7 @@ pub fn row_view(
             <td class="num">{ format_si(p.gold) }</td>
             <td class="num">{ format_si(p.boss_damage) }</td>
             <td>{ &p.area }</td>
-            <td>{ format!("{age_s}s ago") }</td>
+            <td>{ locale.fmt_seconds_ago(age_s) }</td>
             <td><span class={badge_cls}>{ badge_text }</span></td>
         </tr>
     }
@@ -92,19 +102,20 @@ pub fn row_view(
 /// see traffic without instrumenting the console. Empty mailbox or
 /// missing mailbox_key both render distinct copy.
 pub fn render_mailbox_panel(
+    locale: Locale,
     c: &Core,
     on_self_test: Callback<MouseEvent>,
 ) -> Html {
     if c.mailbox_key.is_none() {
         return html! {
             <p class="muted small">
-                { "Mailbox contract not configured. Publish " }
+                { locale.tr(MessageId::MailboxNotConfiguredHead) }
                 <code>{ "mailbox-contract" }</code>
-                { " via " }
+                { locale.tr(MessageId::MailboxNotConfiguredVia) }
                 <code>{ "scripts/dev-publish.sh" }</code>
-                { " (extension WIP) or set " }
+                { locale.tr(MessageId::MailboxNotConfiguredTail) }
                 <code>{ "mailbox_contract_id_b58" }</code>
-                { " in " }
+                { locale.tr(MessageId::MailboxNotConfiguredIn) }
                 <code>{ "dev-keys.json" }</code>
                 { "." }
             </p>
@@ -114,24 +125,23 @@ pub fn render_mailbox_panel(
     html! { <>
         <div class="action-row">
             <button onclick={on_self_test} disabled={c.pubkey.is_none()}>
-                { "Send test message to self" }
+                { locale.tr(MessageId::BtnSendTestSelf) }
             </button>
-            <span class="muted small">{ format!("inbox: {inbox_n} message{}",
-                if inbox_n == 1 { "" } else { "s" }) }</span>
+            <span class="muted small">{ locale.fmt_inbox_count(inbox_n) }</span>
         </div>
         {
             if c.mailbox.is_empty() {
-                html! { <p class="muted small">{ "(no messages yet — click the button above to round-trip a chat)" }</p> }
+                html! { <p class="muted small">{ locale.tr(MessageId::MailboxEmpty) }</p> }
             } else {
                 let take = c.mailbox.len().min(5);
                 html! {
                     <ul class="mailbox-list">
                         { for c.mailbox[..take].iter().map(|m| {
                             let kind_label = match m.kind {
-                                shared::MSG_KIND_CHAT => "chat",
-                                shared::MSG_KIND_GIFT => "gift",
-                                shared::MSG_KIND_GUILD_INVITE => "guild-invite",
-                                shared::MSG_KIND_TRADE_OFFER => "trade-offer",
+                                shared::MSG_KIND_CHAT => locale.tr(MessageId::MailboxKindChat),
+                                shared::MSG_KIND_GIFT => locale.tr(MessageId::MailboxKindGift),
+                                shared::MSG_KIND_GUILD_INVITE => locale.tr(MessageId::MailboxKindGuildInvite),
+                                shared::MSG_KIND_TRADE_OFFER => locale.tr(MessageId::MailboxKindTradeOffer),
                                 _ => "?",
                             };
                             let preview = String::from_utf8_lossy(&m.body).into_owned();
