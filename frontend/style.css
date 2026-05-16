@@ -372,36 +372,75 @@ h3 { font-size: 0.82em; color: var(--fg-muted); margin: 1em 0 0.4em; text-transf
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 0.5em;
 }
-/* Graph layout (C3a) — one column per depth from a starter, cards
-   stacked top-to-bottom inside. Horizontal scroll on overflow so
-   deep graphs read like a Subway diagram instead of collapsing.
-   Mobile collapses everything back to a single column. */
+/* Graph layout (C3a) — top-to-bottom tree. Each depth is its own
+   row; areas at that depth share the row horizontally and stay
+   centred so branches splay symmetrically. Each non-starter card
+   gets a thin connector line above it pointing to the row of
+   predecessors, plus a localised "↑ Forest Road" label so the
+   player can trace which upstream node unlocked it. Mobile keeps
+   the same top-to-bottom flow — cards just wrap tighter. */
 .area-graph {
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(190px, 1fr);
-    gap: 0.75em;
-    overflow-x: auto;
-    padding-bottom: 0.4em;
-}
-.area-graph .graph-col {
     display: flex;
     flex-direction: column;
-    gap: 0.5em;
+    gap: 1.4em;
+    padding: 0.6em 0.4em 0.4em;
+    overflow-x: auto;
 }
-.area-graph .graph-node { position: relative; }
-/* Per-card hint showing the upstream area names — "↳ Forest Road".
-   Sits below each non-starter card; small muted line so it doesn't
-   compete with the card's title. */
+.area-graph .graph-row {
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    align-items: stretch;
+    flex-wrap: wrap;
+    gap: 0.9em;
+    position: relative;
+}
+.area-graph .graph-node {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 170px;
+    max-width: 220px;
+    flex: 0 1 200px;
+}
+/* Vertical connector stub above each non-starter card, drawn as a
+   pseudo-element so the markup stays clean. Cards on row 0 (no
+   predecessors) skip it via the `.starter` class. */
+.area-graph .graph-node.has-parent::before {
+    content: "";
+    position: absolute;
+    top: -1em;
+    left: 50%;
+    width: 1px;
+    height: 1em;
+    background: var(--border-soft);
+}
+.area-graph .graph-node.has-parent::after {
+    content: "";
+    position: absolute;
+    top: -1.05em;
+    left: calc(50% - 4px);
+    width: 8px;
+    height: 8px;
+    border-right: 1px solid var(--border-soft);
+    border-bottom: 1px solid var(--border-soft);
+    transform: rotate(45deg);
+    background: var(--bg-panel);
+}
+/* Tiny "↑ Predecessor" label under the connector. Same colour as
+   `.muted small` body text. */
 .area-graph .graph-edge-hint {
-    margin: 0.15em 0 0 0.4em;
-    font-size: 0.78em;
+    margin: 0.15em 0 0.25em;
+    font-size: 0.74em;
     color: var(--fg-muted);
+    text-align: center;
+    font-style: italic;
 }
 @media (max-width: 720px) {
-    .area-graph {
-        grid-auto-flow: row;
-        grid-auto-columns: auto;
+    .area-graph .graph-node {
+        min-width: 140px;
+        max-width: none;
+        flex: 1 1 140px;
     }
 }
 .area-card {
@@ -738,12 +777,15 @@ ul.battle-turns {
     display: flex;
     flex-direction: column;
     gap: 0.15em;
-    /* Reserve room for the full 5-row history (battle.rs renders
-       up to 5). Without this the panel grows from 0 → 5 lines as
-       turns accumulate and the page reflows. Five rows × line-
-       height ≈ 9em comfortable. */
-    min-height: 9em;
-    justify-content: flex-end;
+    /* Match the mission briefing footprint (~3 wrapped lines): the
+       panel keeps a stable size whether 0 or 5 turns have landed,
+       and additional rows scroll inside instead of pushing the
+       page. Newest row sits at top of the list (caller renders
+       `iter().rev().take(5)`) so it's always visible without
+       auto-scroll plumbing. */
+    min-height: 4.5em;
+    max-height: 4.5em;
+    overflow-y: auto;
 }
 .battle-turn-row {
     font-size: 0.78em;

@@ -1243,15 +1243,24 @@ pub fn render_core(
                                         // they should learn the loop,
                                         // then they can automate it.
                                         if inv.revealed_has(shared::RevealKey::AutoMission) {
+                                            // Auto-mission and Estate are the same kind of
+                                            // idle commitment — only one can hold the
+                                            // single-active-action slot (§5.6). Grey the
+                                            // toggle while Estate is running so the player
+                                            // sees the conflict at a glance instead of
+                                            // toggling auto-mission and silently flipping
+                                            // their accrual mode.
+                                            let auto_disabled = my.is_none() || estate_blocking_combat;
+                                            let auto_tip = if estate_blocking_combat {
+                                                locale.tr(MessageId::TipEstateBlocksCombat)
+                                            } else if inv.current_battle.is_some() {
+                                                locale.tr(MessageId::TipAutoToggleMidFight)
+                                            } else { "" };
                                             html! {
                                                 <button class={classes!(anim_cls(shared::RevealKey::AutoMission))}
                                                         onclick={on_toggle_auto}
-                                                        disabled={my.is_none()}
-                                                        title={
-                                                            if inv.current_battle.is_some() {
-                                                                locale.tr(MessageId::TipAutoToggleMidFight)
-                                                            } else { "" }
-                                                        }>
+                                                        disabled={auto_disabled}
+                                                        title={auto_tip}>
                                                     { auto_label }
                                                 </button>
                                             }
@@ -1537,44 +1546,43 @@ pub fn render_core(
                             <p class="muted small">
                                 { locale.fmt_currently_farming(i18n_shared::area_name(locale, area), lvl) }
                             </p>
-                            // Graph view (C3a): one column per
-                            // depth from a starter, cards stacked
-                            // vertically within. Edges between
-                            // adjacent columns are drawn as a CSS
-                            // `↳` chevron stamp on each non-starter
-                            // card — simpler than SVG line plumbing
-                            // and still reads as "Forest → Deep
-                            // Forest / Mountain Pass". The flat
-                            // list rendering is gone; on mobile the
-                            // columns collapse to rows via the
-                            // matching @media block in style.css.
+                            // Graph view (C3a): top-to-bottom tree
+                            // — one row per depth, cards within a
+                            // row laid out horizontally and
+                            // centred. Each non-starter card has a
+                            // CSS connector line + arrowhead above
+                            // it (see `.graph-node.has-parent` in
+                            // style.css) plus a localised "↑
+                            // Predecessor" label. The flow grows
+                            // downward as new branches ship —
+                            // adding a row is just `predecessors:
+                            // &[parent_id]` on an `AreaDef`.
                             <div class="area-graph">
-                                { for area_columns.iter().map(|(depth, cols)| html! {
-                                    <div class={classes!("graph-col", format!("depth-{}", depth))}>
-                                        { for cols.iter().map(|a| html! {
-                                            <div class="graph-node">
-                                                { render_area_card(locale, a, inv.current_area, lvl, inv, &mk_set_area_cb) }
-                                                {
-                                                    if a.predecessors.is_empty() {
-                                                        html! {}
-                                                    } else {
-                                                        // Show the upstream area names so the
-                                                        // player sees the graph connectivity at
-                                                        // a glance. Names are localised via
-                                                        // `i18n_shared::area_name`.
-                                                        let upstream: Vec<String> = a.predecessors
-                                                            .iter()
-                                                            .filter_map(|pid| shared::AREAS.iter().find(|x| x.id == *pid))
-                                                            .map(|p| i18n_shared::area_name(locale, p).to_string())
-                                                            .collect();
-                                                        html! {
-                                                            <p class="graph-edge-hint muted small">
-                                                                { format!("↳ {}", upstream.join(" / ")) }
-                                                            </p>
-                                                        }
+                                { for area_columns.iter().map(|(depth, row_areas)| html! {
+                                    <div class={classes!("graph-row", format!("depth-{}", depth))}>
+                                        { for row_areas.iter().map(|a| {
+                                            let has_parent = !a.predecessors.is_empty();
+                                            let upstream_label = if has_parent {
+                                                let names: Vec<String> = a.predecessors
+                                                    .iter()
+                                                    .filter_map(|pid| shared::AREAS.iter().find(|x| x.id == *pid))
+                                                    .map(|p| i18n_shared::area_name(locale, p).to_string())
+                                                    .collect();
+                                                Some(format!("↑ {}", names.join(" / ")))
+                                            } else {
+                                                None
+                                            };
+                                            let node_cls = if has_parent { "graph-node has-parent" } else { "graph-node starter" };
+                                            html! {
+                                                <div class={node_cls}>
+                                                    {
+                                                        if let Some(label) = upstream_label.as_ref() {
+                                                            html! { <p class="graph-edge-hint">{ label }</p> }
+                                                        } else { html! {} }
                                                     }
-                                                }
-                                            </div>
+                                                    { render_area_card(locale, a, inv.current_area, lvl, inv, &mk_set_area_cb) }
+                                                </div>
+                                            }
                                         }) }
                                     </div>
                                 }) }
