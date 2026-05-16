@@ -646,6 +646,12 @@ impl Locale {
                 "Permanent upgrades — bought once, kept forever. Legacy stars come from level milestones; Insight from missions and Astral activities; Tokens from personal boss damage. Routine targets and the World Boss Attack live here too.",
             (Self::Ru, MessageId::MasteryIntro) =>
                 "Постоянные улучшения — покупаются один раз, остаются навсегда. Звёзды Наследия — за уровни; Прозрение — за миссии и астральные занятия; Жетоны — за личный урон по Боссу. Цели Распорядка и Удар по Мировому Боссу — тоже здесь.",
+            (Self::En, MessageId::PanelWilds) => "Wilds",
+            (Self::Ru, MessageId::PanelWilds) => "Дикие земли",
+            (Self::En, MessageId::WildsDesc) =>
+                "Late-game alternate map, procedurally generated from your plot seed. Names + enemy stat noise are unique to you; topology is fixed (8 nodes, two branches off the entrance, a confluence node). No World Boss contribution.",
+            (Self::Ru, MessageId::WildsDesc) =>
+                "Альтернативная карта поздней игры, процедурно сгенерированная из твоего сюжетного зерна. Названия и разброс характеристик уникальны для тебя; топология фиксирована (8 узлов, две ветви от входа, узел-схождение). Урон по Мировому Боссу не наносится.",
 
             // German (C5). Selective overrides for the highest-impact
             // surface area (tabs, status pills) — anything not listed
@@ -1525,6 +1531,8 @@ pub enum MessageId {
     ResInsight,
     ResTokens,
     MasteryIntro,
+    PanelWilds,
+    WildsDesc,
 
     // Settings descriptive paragraphs (long copy that lives next to
     // each h3). Several read as inline fragments next to a <strong>

@@ -180,6 +180,21 @@ impl DelegateInterface for IdentityDelegate {
                 amount,
                 now_ms,
             } => map_inv(actions::sell_consumable(ctx, kind, amount, now_ms)),
+            AppRequest::BulkBuyItem { kind, count, now_ms } => {
+                map_inv(actions::bulk_buy_item(ctx, kind, count, now_ms))
+            }
+            AppRequest::BulkBuyGearRoll {
+                slot,
+                tier,
+                count,
+                now_ms,
+            } => map_inv(actions::bulk_buy_gear_roll(ctx, slot, tier, count, now_ms)),
+            AppRequest::ClaimBossKill {
+                era,
+                era_max_hp,
+                rank,
+                now_ms,
+            } => map_inv(actions::claim_boss_kill(ctx, era, era_max_hp, rank, now_ms)),
         };
 
         let out_envelope = DelegateEnvelopeOut {

@@ -495,6 +495,40 @@ pub fn render_core(
             })
         }
     };
+    // Bulk-buy factory: `count == 0` is the "max-affordable"
+    // wire signal the delegate caps at 100. Used by the +10 /
+    // ×max buttons next to single-Buy on the shop gear table.
+    let mk_bulk_buy_gear_cb = {
+        let core = core_cell.clone();
+        let pending = pending.clone();
+        let bump = bump.clone();
+        move |slot: u8, tier: u8, count: u32| {
+            let core = core.clone();
+            let pending = pending.clone();
+            let bump = bump.clone();
+            Callback::from(move |_| {
+                crate::freenet::actions::gear::bulk_buy_gear_roll_once(
+                    core.clone(), pending.clone(), bump.clone(), slot, tier, count,
+                )
+            })
+        }
+    };
+    // Same idea for shop consumables.
+    let mk_bulk_buy_item_cb = {
+        let core = core_cell.clone();
+        let pending = pending.clone();
+        let bump = bump.clone();
+        move |kind: u8, count: u32| {
+            let core = core.clone();
+            let pending = pending.clone();
+            let bump = bump.clone();
+            Callback::from(move |_| {
+                crate::freenet::actions::shop::bulk_buy_item_once(
+                    core.clone(), pending.clone(), bump.clone(), kind, count,
+                )
+            })
+        }
+    };
     let mk_buy_skill_cb = {
         let core = core_cell.clone();
         let pending = pending.clone();
@@ -1732,6 +1766,14 @@ pub fn render_core(
                         // `idle_action = IDLE_ACTION_ACTIVITY` and
                         // locks out auto-mission / Estate.
                         { render_activities_panel(c, locale, core_cell.clone(), pending.clone(), bump.clone()) }
+                        // Wilds graph (C3b). Hidden until the player
+                        // reaches the entry-area's min_level so the
+                        // late-game alt-progression doesn't clutter
+                        // the early UI. Same depth-row layout as the
+                        // main map; node IDs sit in the `100+`
+                        // namespace so they don't collide with the
+                        // linear chain.
+                        { render_wilds_panel(c, locale, &mk_set_area_cb) }
                         <section class="panel plot">
                             <h2>{ locale.tr(MessageId::PanelPlotSoFar) }</h2>
                             <p class="chapter-no muted">{ locale.fmt_chapter(chap_no as u64) }</p>
@@ -1763,6 +1805,20 @@ pub fn render_core(
                                         >
                                             { locale.fmt_buy_gold(POTION_PRICE) }
                                         </button>
+                                        <button
+                                            onclick={mk_bulk_buy_item_cb(CONSUMABLE_POTION, 10)}
+                                            disabled={inv.gold < POTION_PRICE.saturating_mul(10)}
+                                            title="buy 10 at once"
+                                        >
+                                            { format!("×10 ({}g)", POTION_PRICE * 10) }
+                                        </button>
+                                        <button
+                                            onclick={mk_bulk_buy_item_cb(CONSUMABLE_POTION, 0)}
+                                            disabled={inv.gold < POTION_PRICE}
+                                            title="buy as many as gold allows (capped at 1000)"
+                                        >
+                                            { "max" }
+                                        </button>
                                         {
                                             // Sell-stack button — half the buy price per
                                             // potion, label embeds the total gain so the
@@ -1792,6 +1848,20 @@ pub fn render_core(
                                             disabled={inv.gold < FIREBALL_PRICE}
                                         >
                                             { locale.fmt_buy_gold(FIREBALL_PRICE) }
+                                        </button>
+                                        <button
+                                            onclick={mk_bulk_buy_item_cb(CONSUMABLE_FIREBALL, 10)}
+                                            disabled={inv.gold < FIREBALL_PRICE.saturating_mul(10)}
+                                            title="buy 10 at once"
+                                        >
+                                            { format!("×10 ({}g)", FIREBALL_PRICE * 10) }
+                                        </button>
+                                        <button
+                                            onclick={mk_bulk_buy_item_cb(CONSUMABLE_FIREBALL, 0)}
+                                            disabled={inv.gold < FIREBALL_PRICE}
+                                            title="buy as many as gold allows (capped at 1000)"
+                                        >
+                                            { "max" }
                                         </button>
                                         {
                                             if inv.fireballs > 0 {
@@ -1905,12 +1975,25 @@ pub fn render_core(
                                                 <th>{ i18n_shared::slot_name(locale, slot_idx) }</th>
                                                 { for [1u8, 2, 3].iter().map(|t| {
                                                     let price = shop_buy_price(*t);
+                                                    let bulk10_price = price.saturating_mul(10);
                                                     html! {
                                                         <td class="num">
-                                                            <button
-                                                                onclick={mk_buy_gear_cb(slot_u8, *t)}
-                                                                disabled={inv.gold < price}
-                                                            >{ locale.tr(MessageId::BtnBuy) }</button>
+                                                            <div class="buy-grid-actions">
+                                                                <button
+                                                                    onclick={mk_buy_gear_cb(slot_u8, *t)}
+                                                                    disabled={inv.gold < price}
+                                                                >{ locale.tr(MessageId::BtnBuy) }</button>
+                                                                <button
+                                                                    onclick={mk_bulk_buy_gear_cb(slot_u8, *t, 10)}
+                                                                    disabled={inv.gold < bulk10_price}
+                                                                    title={format!("buy 10 at {bulk10_price}g")}
+                                                                >{ "×10" }</button>
+                                                                <button
+                                                                    onclick={mk_bulk_buy_gear_cb(slot_u8, *t, 0)}
+                                                                    disabled={inv.gold < price}
+                                                                    title="buy as many as gold allows (capped at 100)"
+                                                                >{ "max" }</button>
+                                                            </div>
                                                         </td>
                                                     }
                                                 }) }
@@ -2804,6 +2887,102 @@ fn render_activities_panel(
                     }) }
                 </tbody>
             </table>
+        </section>
+    }
+}
+
+/// Wilds map (C3b). Builds the per-player procedural graph
+/// from the inventory's `plot_seed` (so each player gets a
+/// stable personal map across reloads but everyone's name list
+/// differs). Hidden until the entrance area's `min_level` is
+/// met so it doesn't clutter the early game. Same depth-row
+/// layout as the main graph; activity / mission paths see the
+/// dynamic AreaDef the same way they see static `AREAS`.
+fn render_wilds_panel<F>(
+    c: &Core,
+    locale: Locale,
+    mk_set_area_cb: &F,
+) -> Html
+where
+    F: Fn(u8) -> Callback<MouseEvent>,
+{
+    let inv = &c.inventory;
+    let lvl = shared::level_of(inv);
+    let wilds = shared::wilds_areas(inv.plot_seed);
+    // Gate the whole panel on the entrance area's level — no
+    // point showing a locked panel to new players.
+    let entrance = match wilds.iter().find(|a| a.id == shared::WILDS_AREA_BASE) {
+        Some(e) => e,
+        None => return html! {},
+    };
+    if lvl + 5 < entrance.min_level {
+        return html! {};
+    }
+    // Group by depth = max(predecessor depth) + 1, same fixed-
+    // point relaxation as the main graph.
+    let mut depths: std::collections::BTreeMap<u8, u8> =
+        std::collections::BTreeMap::new();
+    for area in &wilds {
+        if area.predecessors.is_empty() {
+            depths.insert(area.id, 0);
+        }
+    }
+    let mut changed = true;
+    let mut guard = 0;
+    while changed && guard < 32 {
+        changed = false;
+        for area in &wilds {
+            if area.predecessors.is_empty() { continue; }
+            let max_pred = area.predecessors.iter()
+                .filter_map(|p| depths.get(p).copied())
+                .max();
+            if let Some(d) = max_pred {
+                let new_d = d + 1;
+                let entry = depths.entry(area.id).or_insert(new_d);
+                if *entry != new_d {
+                    *entry = new_d;
+                    changed = true;
+                }
+            }
+        }
+        guard += 1;
+    }
+    let mut by_depth: std::collections::BTreeMap<u8, Vec<&shared::AreaDef>> =
+        std::collections::BTreeMap::new();
+    for area in &wilds {
+        let d = depths.get(&area.id).copied().unwrap_or(0);
+        by_depth.entry(d).or_default().push(area);
+    }
+    html! {
+        <section class="panel world-map wilds">
+            <h2>{ locale.tr(MessageId::PanelWilds) }</h2>
+            <p class="muted small">{ locale.tr(MessageId::WildsDesc) }</p>
+            <div class="area-graph">
+                { for by_depth.iter().map(|(_depth, row_areas)| html! {
+                    <div class="graph-row">
+                        { for row_areas.iter().map(|a| {
+                            let has_parent = !a.predecessors.is_empty();
+                            let upstream_label = if has_parent {
+                                let names: Vec<String> = a.predecessors
+                                    .iter()
+                                    .filter_map(|pid| wilds.iter().find(|x| x.id == *pid))
+                                    .map(|p| p.name.to_string())
+                                    .collect();
+                                Some(format!("↑ {}", names.join(" / ")))
+                            } else { None };
+                            let node_cls = if has_parent { "graph-node has-parent" } else { "graph-node starter" };
+                            html! {
+                                <div class={node_cls}>
+                                    { if let Some(label) = upstream_label.as_ref() {
+                                        html! { <p class="graph-edge-hint">{ label }</p> }
+                                    } else { html! {} } }
+                                    { render_area_card(locale, a, inv.current_area, lvl, inv, mk_set_area_cb) }
+                                </div>
+                            }
+                        }) }
+                    </div>
+                }) }
+            </div>
         </section>
     }
 }

@@ -187,6 +187,44 @@ pub fn buy_gear_roll(
     Ok(inv)
 }
 
+/// Bulk-buy `count` rolls of (slot, tier). `count == 0` ≡
+/// "buy as many as the wallet allows", capped at 100 per call
+/// so a single click can't dump the entire treasury into one
+/// stash bucket.
+pub fn bulk_buy_gear_roll(
+    ctx: &mut DelegateCtx,
+    slot: u8,
+    tier: u8,
+    count: u32,
+    now_ms: u64,
+) -> Result<Inventory, String> {
+    const MAX_PER_CALL: u32 = 100;
+    let mut inv = load_inventory_raw(ctx);
+    enter_action(&mut inv, now_ms)?;
+    let price = shop_buy_price(tier);
+    if price == u64::MAX {
+        return Err(format!(
+            "tier {tier} is not buyable (legendaries only drop or forge)"
+        ));
+    }
+    let max_affordable = (inv.gold / price).min(MAX_PER_CALL as u64) as u32;
+    let want = if count == 0 { max_affordable } else { count.min(max_affordable) };
+    if want == 0 {
+        return Err(format!("need {price}g for tier {tier} {}", slot_label(slot)));
+    }
+    for _ in 0..want {
+        let Some(cid) = shop_roll_catalog_id(slot, tier, inv.shop_purchase_count) else {
+            break;
+        };
+        inv.gold = inv.gold.saturating_sub(price);
+        inv.unequipped.push(cid);
+        inv.shop_purchase_count = inv.shop_purchase_count.saturating_add(1);
+    }
+    check_achievements(&mut inv, now_ms);
+    save_inventory(ctx, &mut inv)?;
+    Ok(inv)
+}
+
 fn slot_label(slot: u8) -> &'static str {
     shared::SLOT_NAMES
         .get(slot as usize)

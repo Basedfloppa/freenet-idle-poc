@@ -272,6 +272,44 @@ fn app() -> Html {
                             );
                         }
                     }
+
+                    // C1+C2 era-advance auto-claim: when the
+                    // cross-player cumulative damage crosses an
+                    // era threshold, fire `ClaimBossKill` to
+                    // award Legacy stars + Tokens. Frontend has
+                    // the contract state, delegate doesn't —
+                    // hence the client-side trigger. Idempotent:
+                    // delegate rejects re-claims of the same era.
+                    if has_pubkey {
+                        let claim_args = {
+                            let g = core.borrow();
+                            let Some(c) = g.as_ref() else { return };
+                            let (era, _hp_rem, max_hp, _total) =
+                                crate::game::derived::world_boss_state(c);
+                            if max_hp == 0 {
+                                None
+                            } else if era > c.inventory.boss_era_witnessed {
+                                let my_pk = c.pubkey;
+                                let my_dmg = my_pk
+                                    .and_then(|pk| c.cumulative_damage.get(&pk).copied())
+                                    .unwrap_or(0);
+                                let rank = c
+                                    .cumulative_damage
+                                    .values()
+                                    .filter(|d| **d > my_dmg)
+                                    .count() as u8;
+                                Some((era, max_hp, rank))
+                            } else {
+                                None
+                            }
+                        };
+                        if let Some((era, max_hp, rank)) = claim_args {
+                            crate::freenet::actions::activity::claim_boss_kill_once(
+                                core.clone(), pending.clone(), bump.clone(),
+                                era, max_hp, rank,
+                            );
+                        }
+                    }
                 })
             };
 

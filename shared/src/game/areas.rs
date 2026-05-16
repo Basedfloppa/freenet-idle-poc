@@ -131,6 +131,22 @@ pub fn area_of(id: u8) -> &'static AreaDef {
     AREAS.iter().find(|a| a.id == id).unwrap_or(&AREAS[0])
 }
 
+/// Resolve an area by id with Wilds fallback. `id < WILDS_AREA_BASE`
+/// hits the hardcoded `AREAS` table; `id >= WILDS_AREA_BASE`
+/// generates the procedural Wilds set from `plot_seed` and
+/// searches it. Returns an owned `AreaDef` because Wilds nodes
+/// are dynamic — combat and `set_area` use this when they need
+/// to support both worlds.
+pub fn resolve_area(id: u8, plot_seed: u32) -> Option<AreaDef> {
+    if id < super::wilds::WILDS_AREA_BASE {
+        AREAS.iter().find(|a| a.id == id).copied()
+    } else {
+        super::wilds::wilds_areas(plot_seed)
+            .into_iter()
+            .find(|a| a.id == id)
+    }
+}
+
 /// All predecessor area ids whose clear-count can satisfy the gate
 /// on `area_id`. Empty slice = starter area / no predecessor.
 /// OR-semantic: the player only needs `clears_required` clears in

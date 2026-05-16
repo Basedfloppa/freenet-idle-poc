@@ -82,3 +82,23 @@ pub fn buy_token_perk_once(
         "buy token perk",
     );
 }
+
+/// Claim era-advance stars + tokens after the frontend
+/// observes an era change in the presence-contract state.
+pub fn claim_boss_kill_once(
+    core: CoreCell,
+    pending: PendingCell,
+    bump: UseStateSetter<u64>,
+    era: u64,
+    era_max_hp: u64,
+    rank: u8,
+) {
+    let now_ms = now_ms();
+    delegate_op_once(
+        core,
+        pending,
+        bump,
+        AppRequest::ClaimBossKill { era, era_max_hp, rank, now_ms },
+        "claim boss kill",
+    );
+}

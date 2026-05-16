@@ -217,6 +217,39 @@ pub enum DelegateRequest {
     /// `amount == 0` is treated as "sell all of this kind" so a
     /// single click can empty an overstocked stockpile.
     SellConsumable { kind: u8, amount: u32, now_ms: u64 },
+    /// Bulk-buy `count` consumables of `kind`. `count == 0`
+    /// means "buy as many as the player can afford" (max-buy
+    /// shortcut). Atomic — fails up-front if there isn't gold
+    /// for at least one.
+    BulkBuyItem { kind: u8, count: u32, now_ms: u64 },
+    /// Bulk-buy `count` pre-rolled gear pieces of (`slot`, `tier`).
+    /// Same `count == 0` = "buy max-affordable" convention.
+    /// Each roll is independent — the loop just hammers the
+    /// existing `BuyGearRoll` logic atomically.
+    BulkBuyGearRoll {
+        slot: u8,
+        tier: u8,
+        count: u32,
+        now_ms: u64,
+    },
+    /// World-boss era advanced — claim the player's share of
+    /// stars + tokens. Frontend computes the era / max-HP /
+    /// rank from the presence-contract state it already has
+    /// subscribed; the delegate validates monotonicity
+    /// (`era > boss_era_witnessed`), clamps `dmg_share` to
+    /// `inv.boss_damage - boss_damage_at_era_start`, and
+    /// awards via the curves in `boss_kill_stars_for` /
+    /// `boss_kill_tokens_for_rank`. Idempotent: re-firing the
+    /// same era is a no-op.
+    ClaimBossKill {
+        era: u64,
+        era_max_hp: u64,
+        /// Player's 0-based rank in the boss-kill leaderboard
+        /// (0 = top contributor). The token award only kicks
+        /// in for the top three.
+        rank: u8,
+        now_ms: u64,
+    },
 }
 
 /// Domain split for blob-encoded persisted state. Each variant maps

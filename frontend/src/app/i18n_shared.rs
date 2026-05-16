@@ -142,18 +142,18 @@ pub fn skill_name(locale: Locale, id: u8) -> &'static str {
 
 pub fn skill_blurb(locale: Locale, id: u8) -> &'static str {
     match (locale, id) {
-        (Locale::En, SKILL_SLIME_BODY) => "You've been gooey once. The membrane carries over: +20 HP, +5 defence.",
-        (Locale::Ru, SKILL_SLIME_BODY) => "Ты уже бывал желеобразным. Мембрана остаётся: +20 ОЗ, +5 защиты.",
-        (Locale::En, SKILL_FELINE_GRACE) => "Your reflexes remember the cat: +6 attack.",
-        (Locale::Ru, SKILL_FELINE_GRACE) => "Рефлексы помнят кошку: +6 атаки.",
-        (Locale::En, SKILL_DRAGON_SCALES) => "Stray scales still cling to your skin: +8 attack, +6 defence.",
-        (Locale::Ru, SKILL_DRAGON_SCALES) => "Оставшиеся чешуйки прирастают к коже: +8 атаки, +6 защиты.",
-        (Locale::En, SKILL_STEED_HEART) => "A horse's lung capacity outlasts the form: +25 HP, +4 defence.",
-        (Locale::Ru, SKILL_STEED_HEART) => "Лошадиная ёмкость лёгких переживает форму: +25 ОЗ, +4 защиты.",
-        (Locale::En, SKILL_VETERAN) => "Ten levels of combat experience: +5 attack, +5 defence.",
-        (Locale::Ru, SKILL_VETERAN) => "Десять уровней боевого опыта: +5 атаки, +5 защиты.",
-        (Locale::En, SKILL_CHAMPION) => "Twenty levels in, you've earned the title: +10 atk, +10 def, +30 HP.",
-        (Locale::Ru, SKILL_CHAMPION) => "За двадцать уровней ты заслужил титул: +10 атк, +10 защ, +30 ОЗ.",
+        (Locale::En, SKILL_SLIME_BODY) => "You've been gooey once. The membrane carries over: +10 HP, +3 defence.",
+        (Locale::Ru, SKILL_SLIME_BODY) => "Ты уже бывал желеобразным. Мембрана остаётся: +10 ОЗ, +3 защиты.",
+        (Locale::En, SKILL_FELINE_GRACE) => "Your reflexes remember the cat: +3 attack.",
+        (Locale::Ru, SKILL_FELINE_GRACE) => "Рефлексы помнят кошку: +3 атаки.",
+        (Locale::En, SKILL_DRAGON_SCALES) => "Stray scales still cling to your skin: +4 attack, +3 defence.",
+        (Locale::Ru, SKILL_DRAGON_SCALES) => "Оставшиеся чешуйки прирастают к коже: +4 атаки, +3 защиты.",
+        (Locale::En, SKILL_STEED_HEART) => "A horse's lung capacity outlasts the form: +12 HP, +2 defence.",
+        (Locale::Ru, SKILL_STEED_HEART) => "Лошадиная ёмкость лёгких переживает форму: +12 ОЗ, +2 защиты.",
+        (Locale::En, SKILL_VETERAN) => "Ten levels of combat experience: +3 attack, +3 defence.",
+        (Locale::Ru, SKILL_VETERAN) => "Десять уровней боевого опыта: +3 атаки, +3 защиты.",
+        (Locale::En, SKILL_CHAMPION) => "Twenty levels in, you've earned the title: +5 atk, +5 def, +15 HP.",
+        (Locale::Ru, SKILL_CHAMPION) => "За двадцать уровней ты заслужил титул: +5 атк, +5 защ, +15 ОЗ.",
         _ => "",
     }
 }

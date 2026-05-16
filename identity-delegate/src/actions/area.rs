@@ -7,7 +7,7 @@
 
 use freenet_stdlib::prelude::*;
 
-use shared::{area_of, area_predecessors, level_of, Inventory, AREAS};
+use shared::{level_of, resolve_area, Inventory};
 
 use crate::state::{enter_action, load_inventory_raw, save_inventory};
 
@@ -18,9 +18,8 @@ pub fn set_area(
 ) -> Result<Inventory, String> {
     let mut inv = load_inventory_raw(ctx);
     enter_action(&mut inv, now_ms)?;
-    let area = AREAS
-        .iter()
-        .find(|a| a.id == area_id)
+    let plot_seed = inv.plot_seed;
+    let area = resolve_area(area_id, plot_seed)
         .ok_or_else(|| format!("unknown area_id {area_id}"))?;
     let lvl = level_of(&inv);
     if lvl < area.min_level {
@@ -33,25 +32,27 @@ pub fn set_area(
     // required clear count. The error message names whichever
     // predecessor the player is closest in — most actionable
     // suggestion when they need to know what to grind.
-    let preds = area_predecessors(area_id);
-    if !preds.is_empty() {
-        let satisfied = preds
+    if !area.predecessors.is_empty() {
+        let satisfied = area
+            .predecessors
             .iter()
             .any(|p| inv.area_clears_of(*p) >= area.clears_required);
         if !satisfied {
-            let (best_id, best_have) = preds
+            let (best_id, best_have) = area
+                .predecessors
                 .iter()
                 .map(|p| (*p, inv.area_clears_of(*p)))
                 .max_by_key(|(_, h)| *h)
-                .unwrap_or((preds[0], 0));
-            let prev_name = area_of(best_id).name;
+                .unwrap_or((area.predecessors[0], 0));
+            let prev_name = resolve_area(best_id, plot_seed)
+                .map(|a| a.name)
+                .unwrap_or("?");
             return Err(format!(
                 "cannot enter '{}': need {} clears in '{}' (have {})",
                 area.name, area.clears_required, prev_name, best_have
             ));
         }
     }
-    let _ = AREAS;
     // Drop any active per-zone activity — A1 activities are
     // location-bound (e.g. "Mine ore" in Mountain Pass), so a
     // zone change implicitly stops them. Tick first so the

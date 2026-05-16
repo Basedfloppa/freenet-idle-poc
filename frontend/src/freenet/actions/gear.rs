@@ -55,6 +55,24 @@ pub fn sell_gear_once(
     );
 }
 
+/// Bulk-buy `count` rolls of (slot, tier). `count == 0` ≡
+/// "buy max-affordable", capped at 100 in the delegate.
+pub fn bulk_buy_gear_roll_once(
+    core: CoreCell,
+    pending: PendingCell,
+    bump: UseStateSetter<u64>,
+    slot: u8,
+    tier: u8,
+    count: u32,
+) {
+    let now_ms = now_ms();
+    delegate_op_once(
+        core, pending, bump,
+        AppRequest::BulkBuyGearRoll { slot, tier, count, now_ms },
+        "bulk buy gear",
+    );
+}
+
 /// Bulk-sell every copy of `catalog_id` in the stash.
 pub fn sell_gear_all_once(
     core: CoreCell,

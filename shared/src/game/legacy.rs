@@ -116,6 +116,44 @@ pub struct LegacyState {
     pub ascend_count: u64,
 }
 
+/// Star award curve for the era-advance hook (C1 contract-side
+/// half). `dmg_share` is the player's contribution this era,
+/// `era_max_hp` the era's total HP pool. Stars scale sublinearly
+/// (`^0.7`) so a 10% contributor doesn't get 1/10th of the cap
+/// — the curve rewards participation more evenly than raw share
+/// would. Capped at `BOSS_KILL_STAR_CAP` to keep a single
+/// dominant attacker from minting a galaxy.
+pub const BOSS_KILL_STAR_CAP: u64 = 10;
+
+pub fn boss_kill_stars_for(dmg_share: u64, era_max_hp: u64) -> u64 {
+    if era_max_hp == 0 || dmg_share == 0 {
+        return 0;
+    }
+    // Integer arithmetic on a fixed-point `share_bp` (basis points)
+    // — avoids floating-point in WASM and stays deterministic
+    // across crate versions. share_bp ∈ [0, 10_000].
+    let share_bp = (dmg_share.saturating_mul(10_000) / era_max_hp).min(10_000);
+    if share_bp == 0 {
+        return 0;
+    }
+    // Approximate share_bp^0.7 / 10_000^0.7 × CAP. Lookup table
+    // covering 10 brackets keeps the math cheap and predictable.
+    let bracket = match share_bp {
+        0 => 0,
+        1..=50 => 1,             // <0.5%   share → 1 star (participation)
+        51..=200 => 2,           // <2%     share → 2 stars
+        201..=500 => 3,          // <5%     share → 3 stars
+        501..=1_000 => 4,        // <10%    share → 4 stars
+        1_001..=2_000 => 5,      // <20%    share → 5 stars
+        2_001..=4_000 => 6,      // <40%    share → 6 stars
+        4_001..=6_000 => 7,      // <60%    share → 7 stars
+        6_001..=8_000 => 8,      // <80%    share → 8 stars
+        8_001..=9_500 => 9,      // <95%    share → 9 stars
+        _ => BOSS_KILL_STAR_CAP, // ≥95%    share → cap
+    };
+    bracket.min(BOSS_KILL_STAR_CAP)
+}
+
 impl LegacyState {
     pub fn node_level(&self, node: LegacyNode) -> u64 {
         self.nodes.get(&node.id()).copied().unwrap_or(0)

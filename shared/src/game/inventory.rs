@@ -437,10 +437,64 @@ impl From<InventoryV13> for InventoryV14 {
     }
 }
 
+/// V15 — adds era-watermark tracking for the C1 contract-side
+/// boss-kill flow (`boss_era_witnessed`,
+/// `boss_damage_at_era_start`) and the C2 ranked-token claim
+/// log (`tokens_claimed_eras`). Additive composition over V14,
+/// same wire-format rule as earlier bumps.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InventoryV15 {
+    pub base: InventoryV14,
+    /// Highest world-boss era for which the player has already
+    /// claimed stars / tokens. Frontend bumps it via the
+    /// `ClaimBossKill` RPC when it observes an era advance.
+    /// `u64` to match `era_of_total`'s return type (eras are
+    /// uncapped in principle; the contract clamps at 50 today
+    /// but `u64` keeps room for future).
+    pub boss_era_witnessed: u64,
+    /// Snapshot of `boss_damage` at the start of the current
+    /// era. Used to compute `dmg_share = boss_damage -
+    /// boss_damage_at_era_start` for the star-award curve.
+    pub boss_damage_at_era_start: u64,
+}
+
+impl Default for InventoryV15 {
+    fn default() -> Self {
+        Self {
+            base: InventoryV14::default(),
+            boss_era_witnessed: 0,
+            boss_damage_at_era_start: 0,
+        }
+    }
+}
+
+impl std::ops::Deref for InventoryV15 {
+    type Target = InventoryV14;
+    fn deref(&self) -> &InventoryV14 {
+        &self.base
+    }
+}
+
+impl std::ops::DerefMut for InventoryV15 {
+    fn deref_mut(&mut self) -> &mut InventoryV14 {
+        &mut self.base
+    }
+}
+
+impl From<InventoryV14> for InventoryV15 {
+    fn from(v14: InventoryV14) -> Self {
+        Self {
+            base: v14,
+            boss_era_witnessed: 0,
+            boss_damage_at_era_start: 0,
+        }
+    }
+}
+
 /// Public name for "the current inventory shape". Every consumer
 /// imports `Inventory`; only the persistence layer in the delegate
 /// is aware that this is a versioned type.
-pub type Inventory = InventoryV14;
+pub type Inventory = InventoryV15;
 
 /// On-disk wrapper. Append new variants at the end — deleting or
 /// reordering breaks the bincode discriminant for existing blobs.
@@ -452,30 +506,34 @@ pub enum InventoryWire {
     V12(InventoryV12),
     V13(InventoryV13),
     V14(InventoryV14),
+    V15(InventoryV15),
 }
 
 impl InventoryWire {
     /// Migrate any historical variant to the current `Inventory`.
     pub fn into_latest(self) -> Inventory {
         match self {
-            Self::V9(v9) => InventoryV14::from(InventoryV13::from(InventoryV12::from(
-                InventoryV11::from(InventoryV10::from(v9)),
+            Self::V9(v9) => InventoryV15::from(InventoryV14::from(InventoryV13::from(
+                InventoryV12::from(InventoryV11::from(InventoryV10::from(v9))),
             ))),
-            Self::V10(v10) => InventoryV14::from(InventoryV13::from(InventoryV12::from(
-                InventoryV11::from(v10),
+            Self::V10(v10) => InventoryV15::from(InventoryV14::from(InventoryV13::from(
+                InventoryV12::from(InventoryV11::from(v10)),
             ))),
-            Self::V11(v11) => {
-                InventoryV14::from(InventoryV13::from(InventoryV12::from(v11)))
+            Self::V11(v11) => InventoryV15::from(InventoryV14::from(InventoryV13::from(
+                InventoryV12::from(v11),
+            ))),
+            Self::V12(v12) => {
+                InventoryV15::from(InventoryV14::from(InventoryV13::from(v12)))
             }
-            Self::V12(v12) => InventoryV14::from(InventoryV13::from(v12)),
-            Self::V13(v13) => InventoryV14::from(v13),
-            Self::V14(v14) => v14,
+            Self::V13(v13) => InventoryV15::from(InventoryV14::from(v13)),
+            Self::V14(v14) => InventoryV15::from(v14),
+            Self::V15(v15) => v15,
         }
     }
 }
 
 impl From<Inventory> for InventoryWire {
     fn from(inv: Inventory) -> Self {
-        Self::V14(inv)
+        Self::V15(inv)
     }
 }

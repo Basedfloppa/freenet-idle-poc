@@ -35,6 +35,7 @@ pub mod shop;
 pub mod skills;
 pub mod status;
 pub mod tokens;
+pub mod wilds;
 pub mod xp;
 
 pub use achievements::*;
@@ -57,4 +58,5 @@ pub use shop::*;
 pub use skills::*;
 pub use status::*;
 pub use tokens::*;
+pub use wilds::*;
 pub use xp::*;

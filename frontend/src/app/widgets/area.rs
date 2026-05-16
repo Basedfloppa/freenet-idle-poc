@@ -22,7 +22,7 @@ use crate::app::i18n_shared::{area_blurb, area_name};
 /// borrowed here so each card gets a freshly-baked callback.
 pub fn render_area_card<F>(
     locale: Locale,
-    area: &'static AreaDef,
+    area: &AreaDef,
     current: u8,
     lvl: u64,
     inv: &Inventory,

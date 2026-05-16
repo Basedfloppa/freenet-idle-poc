@@ -10,10 +10,13 @@ An idle/RPG on top of Freenet, where:
 
 ```
 idle-poc/
-├── shared/                   wire types + game model (InventoryV13 = V12 + Legacy
-│                             stars, V12 = V11 + Estate + idle_action, V11 = V10
-│                             + area_clears + reveal bitmask), format_si helper,
-│                             versioned InventoryWire migration chain
+├── shared/                   wire types + game model (InventoryV15 = V14 +
+│                             era-watermark, V14 = V13 + Activity + Routine +
+│                             Insight + Tokens, V13 = V12 + Legacy, V12 = V11 +
+│                             Estate + idle_action, V11 = V10 + area_clears +
+│                             reveal bitmask). Wilds procedural-graph generator,
+│                             format_si helper, versioned InventoryWire migration
+│                             chain
 ├── presence-contract/        Rust contract: LWW merge + cumulative World Boss
 │                             ledger + outlier-resistant prune; caps 1k entries
 ├── mailbox-contract/         Player-to-player signed log (gift / invite /
@@ -159,7 +162,7 @@ deployment uses a different invalidation path.
 | UI prefs (theme, sync cadence, hide_pubkey) | Browser `localStorage` | Display settings + onboarding flag | Settings → Reset to defaults, or DevTools → Clear storage |
 | Active battle (HP, queue) | `Inventory.current_battle` on the node | Server-side state-machine combat | `Reset progress` or node wipe |
 | Identity (Ed25519 seed) | Delegate secret at `/tmp/freenet-local/secrets/local/<delegate-key>/` (key `identity-seed-v1`) | Player's signing key | Wipe the data-dir; identity migrates via **Settings → Export seed** |
-| Inventory (gold, gear, skills, achievements, Estate workers, Legacy stars, …) | Same delegate secret store (key `inventory-v9`, format `InventoryWire::V13(...)` after the V9→V13 migration chain) | Full game progress | `Reset progress` (full wipe) or `Ascend` (soft-reset run; keeps stars/level/missions/skills) |
+| Inventory (gold, gear, skills, achievements, Estate workers, Legacy stars, Insight, Tokens, era-watermark…) | Same delegate secret store (key `inventory-v9`, format `InventoryWire::V15(...)` after the V9→V15 migration chain) | Full game progress | `Reset progress` (full wipe) or `Ascend` (soft-reset run; keeps stars/level/missions/skills) |
 | Presence (`anon-XXXX` + gold + boss_damage + ts) | `presence-contract`, one entry per pubkey | Leaderboard + World Boss aggregate | Auto-prune after 60s of silence (live), watermark persists in `cumulative_damage` |
 | Cumulative World Boss watermark | `presence-contract.cumulative_damage` | Per-key high watermark | Cap-eviction at 10k unique keys |
 | Mailbox messages | `mailbox-contract`, signed log | gift/invite/trade/chat (substrate) | 7-day TTL or 5k-entry cap |
@@ -201,6 +204,11 @@ deployment uses a different invalidation path.
 - **Bulk-sell**: `SellGearAll` RPC and matching "sell ×N (Mg)" button on multi-copy stash rows. `SellConsumable { kind, amount }` RPC + "sell ×N" button on Shop potion / fireball rows (`amount == 0` is the wire signal for "sell everything").
 - **Form-buy clears slot mask**: shop-bought form change now runs `enforce_form_slot_mask` like the defeat-induced path; gear in slots the new form can't wear moves back to stash atomically.
 - **Stash card text contrast on Dusk**: `.area-card.current` overrides the global `.muted` colour for blurb / rewards / clear-count so the active-area card stays legible on the gold-tinted dark background.
+- **B7 bulk-buy** (`BulkBuyItem { kind, count, now_ms }` + `BulkBuyGearRoll { slot, tier, count, now_ms }`): `+10` / `max` buttons next to single-Buy on consumables and on the gear-slot grid. `count == 0` is the wire signal for "buy as many as gold allows" (delegate caps at 1000 / 100 per call). Skills stay one-shot — they're unlocks, not levels.
+- **C1 + C2 era-advance hook** (`ClaimBossKill { era, era_max_hp, rank, now_ms }`): frontend's unified-tick watches `world_boss_state(c)`; when `era > inv.boss_era_witnessed` it computes the player's rank in `c.cumulative_damage` and fires the claim. Delegate validates era-monotonicity, clamps `dmg_share` to `inv.boss_damage - boss_damage_at_era_start`, awards Legacy stars via `boss_kill_stars_for` (sublinear `^0.7` curve, cap 10) AND tokens via `boss_kill_tokens_for_rank` (3/2/1 for top three, 0 otherwise). The personal-milestone token earn rule still runs in parallel; ranked tokens are the bonus.
+- **C3b Wilds procedural graph** (`shared::wilds_areas(seed)`): 8-node DAG generated deterministically from `inv.plot_seed` (xorshift32 PRNG). Two branches off the entrance + one confluence node + jittered enemy stats. Node IDs sit in the `100+` namespace; `shared::resolve_area(id, plot_seed)` unifies lookup so `set_area` and combat both reach into the right table. Gated by entrance `min_level: 15` (visible from level 10).
+- **Skill bonuses ~½**: `skill_bonuses` + `skill_speed_evasion` halved after playtest showed six skills stacking trivialised the post-B6 baseline (Slime def +5→+3 hp +20→+10, Cat atk +6→+3 speed +30→+15 eva +10→+5, Dragon atk +8→+4 def +6→+3 speed +10→+5, Steed hp +25→+12 def +4→+2 speed +20→+10, Veteran +5/+5→+3/+3, Champion +10/+10/+30→+5/+5/+15). Localised blurbs (EN + RU) regenerated to match.
+- **InventoryV15 schema bump**: adds `boss_era_witnessed: u64` + `boss_damage_at_era_start: u64` to support the era-advance claim path. Additive composition over V14, migration chain V9→V15 intact.
 
 **Multiplayer / Freenet**
 - `presence-contract` — World Boss aggregator with a **persistent `cumulative_damage` ledger** (survives entry pruning)
@@ -289,7 +297,7 @@ deployment uses a different invalidation path.
 - **Only the locally-built fdev/freenet are API-consistent.** PATH-fdev 0.3.151 + node 0.1.177 fails with `"input bytes aren't valid utf-8"` while compiling WASM. We use `freenet-core/target/debug/{freenet,fdev}` 0.2.55 / 0.3.218.
 - **fdev needs `CARGO_TARGET_DIR`** — otherwise it searches for the workspace root via its compile-time `CARGO_MANIFEST_DIR` and panics.
 - **The contract pins wire-version 0.6.1** on the frontend side (to talk to node 0.2.55) and uses a path-dep 0.7.0 on the contract/delegate side — the same trick as in `freenet-webrtc-poc`.
-- **`InventoryWire` is non-destructive schema evolution.** Current chain: V9 → V10 (add `current_battle`) → V11 (add `area_clears` + `revealed` bitmask) → V12 (add `Estate` + `idle_action`) → V13 (add `LegacyState`). The on-disk blob is serialised as `InventoryWire::V13(...)` today; older variants decode and auto-promote on first `save_inventory`. **Pattern for purely-additive bumps**: `pub struct InventoryV(N+1) { pub base: InventoryV(N), <new_fields> }` with `Deref`/`DerefMut` to the base. Bincode serialises structs as concatenated fields, so the wire format is byte-identical to a flat layout — old V11/V12 blobs keep decoding even though the type tree got deeper. For remove/rename, re-declare flat.
+- **`InventoryWire` is non-destructive schema evolution.** Current chain: V9 → V10 (add `current_battle`) → V11 (add `area_clears` + `revealed` bitmask) → V12 (add `Estate` + `idle_action`) → V13 (add `LegacyState`) → V14 (add `active_activity` + `RoutineState` + `InsightState` + `TokenState`) → V15 (add `boss_era_witnessed` + `boss_damage_at_era_start`). The on-disk blob is serialised as `InventoryWire::V15(...)` today; older variants decode and auto-promote on first `save_inventory`. **Pattern for purely-additive bumps**: `pub struct InventoryV(N+1) { pub base: InventoryV(N), <new_fields> }` with `Deref`/`DerefMut` to the base. Bincode serialises structs as concatenated fields, so the wire format is byte-identical to a flat layout — old V11/V12/V13/V14 blobs keep decoding even though the type tree got deeper. For remove/rename, re-declare flat.
 - **Combat is a tick-based state machine in the delegate.** `Inventory.current_battle` persists. The frontend polls `TickBattle` every `POLL_TICK_MS = 1s` during a fight; outside combat — the regular pull cadence (5/10/30s per prefs). `TURN_COOLDOWN_MS = 1s` — one turn iteration = queued action + player swing + enemy swing with initiative by `speed`. Offline catch-up uses the same `tick_battle` procedure — online/offline converge on identical numbers.
 - **Auto-mission is persistent.** `Inventory.auto_run_enabled` lives on the node; the toggle button sends `SetAutoRun`. Close the tab, come back an hour later — the delegate simulates the missed ticks (capped at 1 hour) and the "while you were away" banner sums it up.
 - **Mailbox and Guilds are independent contracts.** The frontend subscribes to each in parallel, routes responses by `key.id()`. If the corresponding key isn't configured in `dev-keys.json`, the feature disables gracefully without breaking presence.

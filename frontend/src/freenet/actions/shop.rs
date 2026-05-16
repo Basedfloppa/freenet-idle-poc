@@ -55,6 +55,23 @@ pub fn buy_skill_once(
     );
 }
 
+/// Bulk-buy `count` consumables. `count == 0` ≡ "buy
+/// max-affordable", capped at 1000 in the delegate.
+pub fn bulk_buy_item_once(
+    core: CoreCell,
+    pending: PendingCell,
+    bump: UseStateSetter<u64>,
+    kind: u8,
+    count: u32,
+) {
+    let now_ms = now_ms();
+    delegate_op_once(
+        core, pending, bump,
+        AppRequest::BulkBuyItem { kind, count, now_ms },
+        "bulk buy item",
+    );
+}
+
 /// Sell `amount` copies of a consumable. `amount == 0` is the
 /// "sell whole stack" shortcut.
 pub fn sell_consumable_once(

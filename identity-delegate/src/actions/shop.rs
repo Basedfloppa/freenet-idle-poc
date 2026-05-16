@@ -101,6 +101,44 @@ pub fn sell_consumable(
     Ok(inv)
 }
 
+/// Bulk-buy a stack of consumables in one call. `count == 0`
+/// means "buy as many as the wallet allows". Capped at 1000
+/// per call so a single click can't drain a deep treasury into
+/// a single overflowing stockpile (defensive — tampered webapp
+/// could send `u32::MAX` otherwise).
+pub fn bulk_buy_item(
+    ctx: &mut DelegateCtx,
+    kind: u8,
+    count: u32,
+    now_ms: u64,
+) -> Result<Inventory, String> {
+    const MAX_PER_CALL: u32 = 1_000;
+    let mut inv = load_inventory_raw(ctx);
+    enter_action(&mut inv, now_ms)?;
+    let unit_price = match kind {
+        CONSUMABLE_POTION => POTION_PRICE,
+        CONSUMABLE_FIREBALL => FIREBALL_PRICE,
+        other => return Err(format!("unknown shop item kind {other}")),
+    };
+    if unit_price == 0 {
+        return Err("zero unit price — refused".into());
+    }
+    let max_affordable = (inv.gold / unit_price).min(MAX_PER_CALL as u64) as u32;
+    let want = if count == 0 { max_affordable } else { count.min(max_affordable) };
+    if want == 0 {
+        return Err(format!("not enough gold for one {kind}: need {unit_price}, have {}", inv.gold));
+    }
+    let total = unit_price.saturating_mul(want as u64);
+    inv.gold = inv.gold.saturating_sub(total);
+    match kind {
+        CONSUMABLE_POTION => inv.potions = inv.potions.saturating_add(want),
+        CONSUMABLE_FIREBALL => inv.fireballs = inv.fireballs.saturating_add(want),
+        _ => unreachable!(),
+    }
+    save_inventory(ctx, &mut inv)?;
+    Ok(inv)
+}
+
 pub fn buy_skill(
     ctx: &mut DelegateCtx,
     skill_id: u8,

@@ -1428,6 +1428,15 @@ table.buy-grid th, table.buy-grid td {
 table.buy-grid th { font-weight: 600; color: var(--fg-soft); }
 table.buy-grid td.num { text-align: right; }
 table.buy-grid button { font-size: 0.78em; padding: 0.15em 0.55em; }
+/* Buy-grid bulk-buy actions sit in a small inline-flex row.
+   The +1 / ×10 / max buttons stack horizontally when there's
+   width and wrap on narrow viewports. */
+table.buy-grid .buy-grid-actions {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.2em;
+    justify-content: flex-end;
+}
 table.buy-grid tr.disabled-row { opacity: 0.45; }
 table.buy-grid tr.disabled-row button { cursor: not-allowed; }
 

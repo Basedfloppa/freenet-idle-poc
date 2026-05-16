@@ -19,6 +19,21 @@ use serde::{Deserialize, Serialize};
 
 pub const TOKEN_PER_BOSS_DAMAGE: u64 = 500;
 
+/// Token award for the era-advance ranked-claim path (C2).
+/// Top contributor gets 3 tokens, runner-up 2, third place 1,
+/// everyone else 0. The personal-milestone path
+/// (`TOKEN_PER_BOSS_DAMAGE`) still runs in parallel — ranked
+/// claim is the *bonus* on top of milestone tokens for players
+/// who actively chase the contribution leaderboard.
+pub fn boss_kill_tokens_for_rank(rank: u8) -> u64 {
+    match rank {
+        0 => 3,
+        1 => 2,
+        2 => 1,
+        _ => 0,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum TokenPerk {
