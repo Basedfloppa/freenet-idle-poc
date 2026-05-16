@@ -309,6 +309,12 @@ h3 { font-size: 0.82em; color: var(--fg-muted); margin: 1em 0 0.4em; text-transf
 .pill.casting { background: var(--pill-casting-bg); color: var(--pill-casting-fg); }
 .pill.defeated { background: var(--pill-defeated-bg); color: var(--pill-defeated-fg); }
 .pill.recovering { background: var(--pill-recovering-bg); color: var(--pill-recovering-fg); }
+/* Estate pill — borrows the auto-mission palette but darker so the
+   player sees at a glance "you're idle-active but not in combat". */
+.pill.estate {
+    background: var(--accent-good, #2f6f3f);
+    color: var(--bg-page, #fff);
+}
 
 .panel {
     border: 1px solid var(--border-soft);
@@ -1196,6 +1202,20 @@ ul.ending-list { list-style: none; padding: 0; margin: 0.4em 0; display: flex; f
     background: var(--hue-slot-filled-bg);
     border-color: var(--hue-slot-filled-border);
 }
+/* Tier accent on equipped slots — matches the stash row scheme so
+   gear quality reads at a glance on the Hero panel. Each tier
+   thickens the left border with its own colour; the slot value
+   text takes the same hue for the highest tiers so a Legendary
+   piece visibly pops without enlarging the cell. */
+.slot.filled.tier-1 { border-left: 4px solid var(--tier-1); }
+.slot.filled.tier-2 { border-left: 4px solid var(--tier-2); }
+.slot.filled.tier-3 { border-left: 4px solid var(--tier-3); }
+.slot.filled.tier-4 {
+    border-left: 4px solid var(--tier-4);
+    box-shadow: inset 0 0 0 1px var(--tier-4);
+}
+.slot.filled.tier-3 .slot-value { color: var(--tier-3); }
+.slot.filled.tier-4 .slot-value { color: var(--tier-4); }
 .slot-name { font-size: 0.72em; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; }
 .slot-value { font-size: 0.85em; font-weight: 500; color: var(--fg-base); }
 .slot.filled .slot-value { color: var(--accent-gold-fg); }

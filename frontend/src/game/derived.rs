@@ -3,12 +3,52 @@
 //! exactly the same numbers the delegate uses to resolve combat.
 
 use shared::{
-    area_of, form_speed_evasion, gear_template, level_of, skill_speed_evasion,
-    status_label, xp_for_level, xp_total_for_level, Inventory, STATUS_ADVENTURING,
-    STATUS_DEFEATED, STATUS_FOCUSING, STATUS_READY, STATUS_RECOVERING,
+    area_of, form_slot_mask, form_speed_evasion, gear_template, level_of,
+    skill_speed_evasion, status_label, xp_for_level, xp_total_for_level, Inventory,
+    IDLE_ACTION_ESTATE, SLOT_COUNT, STATUS_ADVENTURING, STATUS_DEFEATED, STATUS_ESTATE,
+    STATUS_FOCUSING, STATUS_READY, STATUS_RECOVERING,
 };
 
 use crate::Core;
+
+/// Would `AutoEquipBest` actually change anything? Mirrors the
+/// delegate's `auto_equip_best` decision loop: for every form-
+/// allowed slot, find the best stash piece for that slot and
+/// compare its score (atk+def+hp) against the currently equipped
+/// piece. Returns `true` as soon as one strict improvement is
+/// found. Used by the frontend to grey out the button when the
+/// player has nothing to upgrade — pressing it would be a no-op
+/// otherwise. Keeps the visual cue in sync with what clicking
+/// will produce.
+pub fn auto_equip_would_change(inv: &Inventory) -> bool {
+    let mask = form_slot_mask(inv.current_form);
+    for slot_idx in 0..SLOT_COUNT {
+        if !mask[slot_idx] {
+            continue;
+        }
+        let best_in_slot = inv
+            .unequipped
+            .iter()
+            .copied()
+            .filter_map(|cid| {
+                let t = gear_template(cid)?;
+                if t.slot as usize != slot_idx {
+                    return None;
+                }
+                Some((t.atk + t.def + t.hp) as u64)
+            })
+            .max();
+        let Some(best_score) = best_in_slot else { continue };
+        let current_score = inv.equipped[slot_idx]
+            .and_then(gear_template)
+            .map(|t| (t.atk + t.def + t.hp) as u64)
+            .unwrap_or(0);
+        if best_score > current_score {
+            return true;
+        }
+    }
+    false
+}
 
 /// Equipment-only bonus sum. The level/form/skill layer is added
 /// on top in [`total_bonuses_from`].
@@ -130,6 +170,10 @@ pub fn status_code(c: &Core) -> u8 {
         STATUS_FOCUSING
     } else if c.inventory.auto_run_enabled {
         STATUS_ADVENTURING
+    } else if c.inventory.idle_action == IDLE_ACTION_ESTATE {
+        // Estate is mutually exclusive with auto-mission (§5.6),
+        // so a separate pill keeps that clear at a glance.
+        STATUS_ESTATE
     } else if max > 0 && c.inventory.current_hp * 2 < max {
         STATUS_RECOVERING
     } else {

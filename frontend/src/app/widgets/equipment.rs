@@ -28,21 +28,29 @@ where
     let slot_name = i18n_shared::slot_name(locale, slot_idx);
     let allowed = form_slot_mask(inv.current_form)[slot_idx];
     let equipped = inv.equipped[slot_idx];
+    // Capture the equipped tier so we can paint the slot with the
+    // matching `--tier-N` accent. Stash rows already do this via
+    // `tier-{N}` class — mirror the same scheme on the hero panel
+    // so quality reads at a glance.
+    let mut equipped_tier: Option<u8> = None;
     let (value_text, stat_text, action) = match equipped {
         Some(cid) => match gear_template(cid) {
-            Some(t) => (
-                i18n_shared::gear_name(locale, &t),
-                stat_blurb(&t),
-                Some(html! {
-                    <button
-                        class="slot-action"
-                        title={locale.tr(MessageId::TipUnequipSlot)}
-                        onclick={mk_unequip(slot_u8)}
-                    >
-                        { "✕" }
-                    </button>
-                }),
-            ),
+            Some(t) => {
+                equipped_tier = Some(t.tier);
+                (
+                    i18n_shared::gear_name(locale, &t),
+                    stat_blurb(&t),
+                    Some(html! {
+                        <button
+                            class="slot-action"
+                            title={locale.tr(MessageId::TipUnequipSlot)}
+                            onclick={mk_unequip(slot_u8)}
+                        >
+                            { "✕" }
+                        </button>
+                    }),
+                )
+            }
             None => (locale.tr(MessageId::TermCorrupt).into(), "—".into(), None),
         },
         None if !allowed => (
@@ -53,9 +61,12 @@ where
         None => (locale.tr(MessageId::TermEmpty).into(), "—".into(), None),
     };
     let cls = match (equipped.is_some(), allowed) {
-        (true, _) => "slot filled",
-        (false, false) => "slot disabled",
-        (false, true) => "slot",
+        (true, _) => {
+            let tier = equipped_tier.unwrap_or(0);
+            format!("slot filled tier-{}", tier)
+        }
+        (false, false) => "slot disabled".to_string(),
+        (false, true) => "slot".to_string(),
     };
     html! {
         <div class={cls}>

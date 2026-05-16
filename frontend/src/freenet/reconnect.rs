@@ -194,12 +194,22 @@ async fn connect_inner(
     bump.set(now_ms());
 
     // WS FIFO ordering ensures the register lands before this probe.
+    //
+    // Auto-update: a fresh `RegisterDelegate` may need a moment on
+    // the node before the delegate is queryable. We wrap the probe
+    // in a 4 s timeout so a hung pubkey query bubbles up as Err
+    // instead of leaving the player on the boot loader forever —
+    // `schedule_reconnect` then retries with the backoff schedule,
+    // re-sending the (idempotent) register on each pass. The
+    // typical fresh-account flow now resolves itself in 1–2
+    // reconnect cycles (<5 s), with no manual page refresh.
     let seed = identity::random_seed_candidate();
-    let pubkey = match delegate_client::call(
+    let pubkey = match delegate_client::call_with_timeout(
         ws.clone(),
         pending.clone(),
         &delegate_key,
         AppRequest::GetPubkey { seed_if_missing: seed },
+        4_000,
     )
     .await?
     {
@@ -208,11 +218,15 @@ async fn connect_inner(
         other => return Err(format!("unexpected delegate response: {other:?}")),
     };
 
-    let inventory = match delegate_client::call(
+    // Same timeout discipline as `GetPubkey` above: if the delegate
+    // is sluggish on a fresh registration, fail fast and let the
+    // reconnect path retry rather than wedging the boot loader.
+    let inventory = match delegate_client::call_with_timeout(
         ws.clone(),
         pending.clone(),
         &delegate_key,
         AppRequest::LoadInventory { now_ms: now_ms() },
+        4_000,
     )
     .await?
     {

@@ -114,6 +114,8 @@ impl Locale {
             (Self::Ru, MessageId::PillRecovering) => "ВОССТАНОВЛЕНИЕ",
             (Self::En, MessageId::PillReady) => "READY",
             (Self::Ru, MessageId::PillReady) => "ГОТОВ",
+            (Self::En, MessageId::PillEstate) => "ESTATE",
+            (Self::Ru, MessageId::PillEstate) => "ПОМЕСТЬЕ",
 
             // ── Settings tab section headers ──
             (Self::En, MessageId::SettingsTitle) => "settings",
@@ -442,6 +444,8 @@ impl Locale {
             (Self::Ru, MessageId::TipAutoToggleMidFight) => "переключатель авто работает и в бою — новое значение применится после окончания текущей схватки",
             (Self::En, MessageId::TipAutoEquipBest) => "walk every slot and equip the highest stat-sum piece you own",
             (Self::Ru, MessageId::TipAutoEquipBest) => "пройти по слотам и надеть лучшие предметы с наибольшей суммой характеристик",
+            (Self::En, MessageId::TipAutoEquipNothing) => "nothing in the stash beats what you're already wearing — drop some loot or change form first",
+            (Self::Ru, MessageId::TipAutoEquipNothing) => "в запасе нет ничего лучше уже надетого — собери ещё лута или смени форму",
             (Self::En, MessageId::TipPotionQueue) => "queue: heal to full on the next combat turn",
             (Self::Ru, MessageId::TipPotionQueue) => "очередь: полное лечение на следующем ходу",
             (Self::En, MessageId::TipPotionIdle) => "heals HP fully",
@@ -487,6 +491,62 @@ impl Locale {
             (Self::En, MessageId::HelpGuildsMailbox) => "guilds & mailbox (early)",
             (Self::Ru, MessageId::HelpGuildsMailbox) => "гильдии и почта (ранняя стадия)",
 
+            // Estate panel (B2)
+            (Self::En, MessageId::PanelEstate) => "Estate",
+            (Self::Ru, MessageId::PanelEstate) => "Поместье",
+            (Self::En, MessageId::EstateBtnPause) => "Pause Estate",
+            (Self::Ru, MessageId::EstateBtnPause) => "Остановить поместье",
+            (Self::En, MessageId::EstateBtnRun) => "Run Estate",
+            (Self::Ru, MessageId::EstateBtnRun) => "Запустить поместье",
+            (Self::En, MessageId::EstateColTier) => "Tier",
+            (Self::Ru, MessageId::EstateColTier) => "Звено",
+            (Self::En, MessageId::EstateColOwned) => "Owned",
+            (Self::Ru, MessageId::EstateColOwned) => "Нанято",
+            (Self::En, MessageId::EstateColYield) => "Yield/s",
+            (Self::Ru, MessageId::EstateColYield) => "Доход/с",
+            (Self::En, MessageId::EstateColNextPrice) => "Next price",
+            (Self::Ru, MessageId::EstateColNextPrice) => "След. цена",
+            (Self::En, MessageId::BtnHire) => "Hire",
+            (Self::Ru, MessageId::BtnHire) => "Нанять",
+            (Self::En, MessageId::EstateResWheat) => "wheat",
+            (Self::Ru, MessageId::EstateResWheat) => "пшеницы",
+            (Self::En, MessageId::EstateResGold) => "gold",
+            (Self::Ru, MessageId::EstateResGold) => "золота",
+            (Self::En, MessageId::EstateResEssence) => "essence",
+            (Self::Ru, MessageId::EstateResEssence) => "эссенции",
+
+            // Legacy panel (C1)
+            (Self::En, MessageId::PanelLegacy) => "Legacy",
+            (Self::Ru, MessageId::PanelLegacy) => "Наследие",
+            (Self::En, MessageId::LegacyColNode) => "Node",
+            (Self::Ru, MessageId::LegacyColNode) => "Узел",
+            (Self::En, MessageId::LegacyColLevel) => "Level",
+            (Self::Ru, MessageId::LegacyColLevel) => "Уровень",
+            (Self::En, MessageId::LegacyColMultiplier) => "Multiplier",
+            (Self::Ru, MessageId::LegacyColMultiplier) => "Множитель",
+            (Self::En, MessageId::LegacyColNextCost) => "Next cost",
+            (Self::Ru, MessageId::LegacyColNextCost) => "След. цена",
+            (Self::En, MessageId::BtnAscend) => "Ascend",
+            (Self::Ru, MessageId::BtnAscend) => "Вознестись",
+            (Self::En, MessageId::LegacyAscendBlurb) =>
+                "Soft-reset: keep stars, level, missions, skills. Wipe gold, gear, Estate.",
+            (Self::Ru, MessageId::LegacyAscendBlurb) =>
+                "Мягкий сброс: звёзды, уровень, миссии и навыки остаются. Сбрасываются золото, экипировка и поместье.",
+            (Self::En, MessageId::LegacyAscendConfirm) =>
+                "Ascend — soft-reset run? Keeps stars, level, mission count, and skills. Wipes gold, gear, and Estate.",
+            (Self::Ru, MessageId::LegacyAscendConfirm) =>
+                "Вознестись — мягкий сброс? Звёзды, уровень, счётчик миссий и навыки сохранятся. Золото, экипировка и поместье обнулятся.",
+
+            // Catchup modal (B4)
+            (Self::En, MessageId::CatchupModalTitle) => "Welcome back",
+            (Self::Ru, MessageId::CatchupModalTitle) => "С возвращением",
+            (Self::En, MessageId::BtnGotIt) => "Got it",
+            (Self::Ru, MessageId::BtnGotIt) => "Понятно",
+            (Self::En, MessageId::NewerBuildDesc) =>
+                "A newer build is live — no detailed changelog this time.",
+            (Self::Ru, MessageId::NewerBuildDesc) =>
+                "Сейчас работает более свежая сборка — подробного списка изменений на этот раз нет.",
+
             // German (C5). Selective overrides for the highest-impact
             // surface area (tabs, status pills) — anything not listed
             // falls through to English via this catch-all arm.
@@ -514,6 +574,7 @@ impl Locale {
             MessageId::PillFocusing => "KONZENTRIERT",
             MessageId::PillRecovering => "ERHOLUNG",
             MessageId::PillReady => "BEREIT",
+            MessageId::PillEstate => "GUT",
             _ => return None,
         })
     }
@@ -579,6 +640,65 @@ impl Locale {
 
     pub fn term_never(self) -> &'static str {
         self.tr(MessageId::TermNever)
+    }
+
+    /// Estate hint line shown above the worker grid — embeds the
+    /// active form name so the player can see at a glance which
+    /// affinities will apply.
+    pub fn fmt_estate_hint(self, form_name: &str) -> String {
+        match self.fmt_locale() {
+            Self::En => format!(
+                "Workers produce while Estate is the active idle action. Active form: {form_name}."
+            ),
+            Self::Ru => format!(
+                "Работники приносят доход, пока активным простойным действием выбрано Поместье. Текущая форма: {form_name}."
+            ),
+            Self::De => unreachable!("fmt_locale normalises De"),
+        }
+    }
+
+    /// Legacy / Epoch header summary — stars, ascend count, and the
+    /// level at which the next star milestone fires.
+    pub fn fmt_legacy_header(
+        self,
+        stars: u64,
+        ascensions: u64,
+        next_star_level: u64,
+    ) -> String {
+        match self.fmt_locale() {
+            Self::En => format!(
+                "Stars: {stars}  ·  Ascensions: {ascensions}  ·  Next star at level {next_star_level}"
+            ),
+            Self::Ru => format!(
+                "Звёзды: {stars}  ·  Вознесений: {ascensions}  ·  След. звезда на уровне {next_star_level}"
+            ),
+            Self::De => unreachable!("fmt_locale normalises De"),
+        }
+    }
+
+    /// Catchup modal "What's new in v…" header — shown above the
+    /// curated patchnotes block.
+    pub fn fmt_whats_new(self, version: &str) -> String {
+        match self.fmt_locale() {
+            Self::En => format!("What's new in v{version}"),
+            Self::Ru => format!("Что нового в v{version}"),
+            Self::De => unreachable!("fmt_locale normalises De"),
+        }
+    }
+
+    /// Catchup modal fallback header — shown when the version
+    /// changed but no curated notes were shipped for this build.
+    pub fn fmt_now_running(self, version: &str) -> String {
+        match self.fmt_locale() {
+            Self::En => format!("Now running v{version}"),
+            Self::Ru => format!("Сейчас работает v{version}"),
+            Self::De => unreachable!("fmt_locale normalises De"),
+        }
+    }
+
+    /// Catchup modal Estate-subsection breakdown line for one tier.
+    pub fn fmt_estate_worker_line(self, tier_name: &str, count: u64) -> String {
+        format!("{tier_name}: {count}")
     }
 
     /// Inbox count line on the mailbox panel — "inbox: N messages".
@@ -1063,6 +1183,7 @@ pub enum MessageId {
     PillFocusing,
     PillRecovering,
     PillReady,
+    PillEstate,
 
     // Settings tab section headers.
     SettingsTitle,
@@ -1221,6 +1342,36 @@ pub enum MessageId {
     HelpDelegateWhat,
     HelpGuildsMailbox,
 
+    // Estate panel (B2).
+    PanelEstate,
+    EstateBtnPause,
+    EstateBtnRun,
+    EstateColTier,
+    EstateColOwned,
+    EstateColYield,
+    EstateColNextPrice,
+    BtnHire,
+    EstateResWheat,
+    EstateResGold,
+    EstateResEssence,
+
+    // Legacy / Epoch panel (C1). `BtnBuy` is defined earlier in
+    // the enum (shared with shop usages) so it isn't re-declared
+    // here.
+    PanelLegacy,
+    LegacyColNode,
+    LegacyColLevel,
+    LegacyColMultiplier,
+    LegacyColNextCost,
+    BtnAscend,
+    LegacyAscendBlurb,
+    LegacyAscendConfirm,
+
+    // Catchup / patchnotes modal (B4).
+    CatchupModalTitle,
+    BtnGotIt,
+    NewerBuildDesc,
+
     // Settings descriptive paragraphs (long copy that lives next to
     // each h3). Several read as inline fragments next to a <strong>
     // (BodyStrong, BodyTail) so they can be reassembled in Yew.
@@ -1261,6 +1412,7 @@ pub enum MessageId {
     TipFightInProgress,
     TipAutoToggleMidFight,
     TipAutoEquipBest,
+    TipAutoEquipNothing,
     TipPotionQueue,
     TipPotionIdle,
     TipFireballQueue,

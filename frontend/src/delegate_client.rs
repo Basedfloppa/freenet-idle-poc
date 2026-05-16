@@ -59,6 +59,17 @@ impl Pending {
         }
     }
 
+    /// Fail a single pending entry by id. Used by the timeout
+    /// watchdog in `call_with_timeout` — if the response hasn't
+    /// arrived by the deadline, the watchdog resolves the awaiting
+    /// future with Err so the caller can decide to retry or
+    /// reconnect instead of hanging forever.
+    pub fn fail_one(&mut self, id: u64, reason: String) {
+        if let Some(tx) = self.awaiting.remove(&id) {
+            let _ = tx.fail(reason);
+        }
+    }
+
     /// Called from the WS result handler when a `DelegateResponse`
     /// frame arrives. Decodes the embedded `AppResponse` and routes
     /// it to whichever future is awaiting this request id.
@@ -310,6 +321,58 @@ pub async fn call(
         .send(req)
         .await
         .map_err(|e| format!("ws send: {e:?}"))?;
+
+    rx.await
+}
+
+/// `call` with an extra wall-clock deadline. If `timeout_ms`
+/// elapses before the response arrives, the pending entry is
+/// failed by a watchdog timer and the awaiter resolves with Err.
+/// Used by the connect handshake to break the deadlock when a
+/// fresh `RegisterDelegate` hasn't fully landed before the first
+/// `GetPubkey` probe — without this, a freshly-registered node
+/// would hang the UI until the player manually refreshed the
+/// page. The caller's reconnect-with-backoff path then re-sends
+/// both messages, giving the node more time on each pass.
+pub async fn call_with_timeout(
+    ws: WsCell,
+    pending: Rc<RefCell<Pending>>,
+    key: &DelegateKey,
+    request: AppRequest,
+    timeout_ms: u32,
+) -> Result<AppResponse, String> {
+    let id = pending.borrow_mut().new_id();
+    let (tx, rx) = oneshot();
+    pending.borrow_mut().register(id, tx);
+
+    let envelope = DelegateEnvelopeIn { request_id: id, request };
+    let payload =
+        bincode::serialize(&envelope).map_err(|e| format!("ser envelope: {e}"))?;
+    let app_msg = ApplicationMessage::new(payload).processed(false);
+
+    let req = ClientRequest::DelegateOp(DelegateRequest::ApplicationMessages {
+        key: key.clone(),
+        params: Parameters::from(Vec::<u8>::new()),
+        inbound: vec![InboundDelegateMsg::ApplicationMessage(app_msg)],
+    });
+
+    ws.borrow_mut()
+        .send(req)
+        .await
+        .map_err(|e| format!("ws send: {e:?}"))?;
+
+    // Watchdog: spawn a timer that fails the pending entry if the
+    // node hasn't replied by `timeout_ms`. If the real response
+    // arrives first, `Pending::deliver` already removed the entry
+    // so `fail_one` is a no-op. Spawned via `spawn_local` so it
+    // runs alongside `rx.await` without blocking.
+    let pending_for_watchdog = pending.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        gloo_timers::future::TimeoutFuture::new(timeout_ms).await;
+        pending_for_watchdog
+            .borrow_mut()
+            .fail_one(id, format!("delegate call timed out after {timeout_ms}ms"));
+    });
 
     rx.await
 }

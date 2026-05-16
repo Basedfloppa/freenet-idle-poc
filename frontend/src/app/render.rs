@@ -11,7 +11,7 @@ use shared::{
     FIREBALL_BOSS_DAMAGE, FIREBALL_PRICE, MISSION_DAMAGE, MISSION_ESSENCE, MISSION_GOLD,
     POTION_PRICE, SKILL_DRAGON_SCALES, SKILL_FELINE_GRACE, SKILL_SLIME_BODY,
     SKILL_STEED_HEART, SLOT_COUNT, STATUS_ADVENTURING, STATUS_DEFEATED,
-    STATUS_FOCUSING, STATUS_RECOVERING, WHEAT_PER_GOLD,
+    STATUS_ESTATE, STATUS_FOCUSING, STATUS_RECOVERING, WHEAT_PER_GOLD,
 };
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
@@ -450,13 +450,14 @@ pub fn render_core(
         let pending = pending.clone();
         let bump = bump.clone();
         Callback::from(move |_: MouseEvent| {
-            // Browser-native confirm — the same chrome the
-            // ResetInventory button uses. Localised text would
-            // need a custom modal, deferred.
+            // Browser-native confirm — same chrome ResetInventory
+            // uses. The message is localised from the live `Core`
+            // so the player sees it in their picked language.
+            let confirm_msg = locale_for_confirm(&core)
+                .tr(MessageId::LegacyAscendConfirm)
+                .to_string();
             let ok = web_sys::window()
-                .and_then(|w| w.confirm_with_message(
-                    "Ascend — soft-reset run? Keeps stars, level, mission count, and skills. Wipes gold, gear, and Estate."
-                ).ok())
+                .and_then(|w| w.confirm_with_message(&confirm_msg).ok())
                 .unwrap_or(false);
             if !ok {
                 return;
@@ -936,6 +937,17 @@ pub fn render_core(
     let mission_damage = MISSION_DAMAGE.saturating_mul(area.damage_mult);
     let (eq_atk, eq_def, eq_hp) = equipped_bonuses(inv);
     let stash_count = inv.unequipped.len();
+    // Auto-Equip Best pre-flight: button stays greyed unless at
+    // least one form-allowed slot has a stash piece that scores
+    // higher than the currently-equipped one. Keeps the button's
+    // visual state honest — pressing it would have been a no-op
+    // otherwise.
+    let auto_equip_can_improve = crate::game::derived::auto_equip_would_change(inv);
+    let auto_equip_tip: String = if auto_equip_can_improve {
+        locale.tr(MessageId::TipAutoEquipBest).to_string()
+    } else {
+        locale.tr(MessageId::TipAutoEquipNothing).to_string()
+    };
     let (xp_cur, xp_req) = xp_in_level(inv);
     let xp_pct = if xp_req == 0 { 100 } else { (xp_cur * 100 / xp_req).min(100) };
     let (p_speed, p_evasion) = player_speed_evasion(inv);
@@ -944,6 +956,7 @@ pub fn render_core(
         STATUS_FOCUSING => "pill casting",
         STATUS_ADVENTURING => "pill auto",
         STATUS_RECOVERING => "pill recovering",
+        STATUS_ESTATE => "pill estate",
         _ => "pill idle",
     };
     // Localised pill text. status_text returns an English &'static str
@@ -955,6 +968,7 @@ pub fn render_core(
         STATUS_FOCUSING => locale.tr(MessageId::PillFocusing),
         STATUS_ADVENTURING => locale.tr(MessageId::PillAdventuring),
         STATUS_RECOVERING => locale.tr(MessageId::PillRecovering),
+        STATUS_ESTATE => locale.tr(MessageId::PillEstate),
         _ => locale.tr(MessageId::PillReady),
     };
     let _ = (area_of_name, status_text);
@@ -1207,8 +1221,8 @@ pub fn render_core(
                                             <div class="action-row">
                                                 <button
                                                     onclick={on_auto_equip}
-                                                    disabled={inv.unequipped.is_empty()}
-                                                    title={locale.tr(MessageId::TipAutoEquipBest)}
+                                                    disabled={!auto_equip_can_improve}
+                                                    title={auto_equip_tip.clone()}
                                                 >
                                                     { locale.tr(MessageId::BtnAutoEquipBest) }
                                                 </button>
@@ -1321,12 +1335,16 @@ pub fn render_core(
                             if inv.revealed_has(shared::RevealKey::Estate) {
                                 let estate_active = inv.idle_action == shared::IDLE_ACTION_ESTATE;
                                 let form_name_str = i18n_shared::form_name(locale, inv.current_form);
-                                let toggle_label = if estate_active { "Pause Estate" } else { "Run Estate" };
+                                let toggle_label = if estate_active {
+                                    locale.tr(MessageId::EstateBtnPause)
+                                } else {
+                                    locale.tr(MessageId::EstateBtnRun)
+                                };
                                 html! {
                                     <section class={classes!("panel", "estate", anim_cls(shared::RevealKey::Estate))}>
-                                        <h2>{ "Estate" }</h2>
+                                        <h2>{ locale.tr(MessageId::PanelEstate) }</h2>
                                         <p class="muted small">
-                                            { format!("Workers produce while Estate is the active idle action. Active form: {}.", form_name_str) }
+                                            { locale.fmt_estate_hint(form_name_str) }
                                         </p>
                                         <div class="action-row">
                                             <button onclick={on_toggle_estate.clone()}>
@@ -1336,10 +1354,10 @@ pub fn render_core(
                                         <table class="estate-grid">
                                             <thead>
                                                 <tr>
-                                                    <th>{ "Tier" }</th>
-                                                    <th class="num">{ "Owned" }</th>
-                                                    <th class="num">{ "Yield/s" }</th>
-                                                    <th class="num">{ "Next price" }</th>
+                                                    <th>{ locale.tr(MessageId::EstateColTier) }</th>
+                                                    <th class="num">{ locale.tr(MessageId::EstateColOwned) }</th>
+                                                    <th class="num">{ locale.tr(MessageId::EstateColYield) }</th>
+                                                    <th class="num">{ locale.tr(MessageId::EstateColNextPrice) }</th>
                                                     <th>{ "" }</th>
                                                 </tr>
                                             </thead>
@@ -1349,9 +1367,9 @@ pub fn render_core(
                                                     let next_price = shared::estate_next_price(tier, owned);
                                                     let aff_bp = shared::form_affinity_bp(inv.current_form, tier.id);
                                                     let res_label = match tier.produces {
-                                                        shared::EstateResource::Wheat => "wheat",
-                                                        shared::EstateResource::Gold => "gold",
-                                                        shared::EstateResource::Essence => "essence",
+                                                        shared::EstateResource::Wheat => locale.tr(MessageId::EstateResWheat),
+                                                        shared::EstateResource::Gold => locale.tr(MessageId::EstateResGold),
+                                                        shared::EstateResource::Essence => locale.tr(MessageId::EstateResEssence),
                                                     };
                                                     let effective_yield = tier
                                                         .yield_per_sec
@@ -1382,7 +1400,7 @@ pub fn render_core(
                                                             <td class="num">{ format_si(next_price) }{ " g" }</td>
                                                             <td>
                                                                 <button onclick={onbuy} disabled={buy_disabled}>
-                                                                    { "Hire" }
+                                                                    { locale.tr(MessageId::BtnHire) }
                                                                 </button>
                                                             </td>
                                                         </tr>
@@ -1932,28 +1950,25 @@ where
     F: Fn(u8) -> Callback<MouseEvent>,
 {
     let legacy = &c.inventory.legacy;
+    let locale = c.prefs.locale;
     if legacy.stars == 0 && legacy.nodes.is_empty() && legacy.ascend_count == 0 {
         return html! {};
     }
+    let next_star_lvl = ((legacy.last_awarded_level / shared::STARS_PER_N_LEVELS) + 1)
+        * shared::STARS_PER_N_LEVELS;
     html! {
         <section class="panel legacy">
-            <h2>{ "Legacy" }</h2>
+            <h2>{ locale.tr(MessageId::PanelLegacy) }</h2>
             <p class="muted small">
-                { format!(
-                    "Stars: {}  ·  Ascensions: {}  ·  Next star at level {}",
-                    legacy.stars,
-                    legacy.ascend_count,
-                    ((legacy.last_awarded_level / shared::STARS_PER_N_LEVELS) + 1)
-                        * shared::STARS_PER_N_LEVELS,
-                ) }
+                { locale.fmt_legacy_header(legacy.stars, legacy.ascend_count, next_star_lvl) }
             </p>
             <table class="legacy-grid">
                 <thead>
                     <tr>
-                        <th>{ "Node" }</th>
-                        <th class="num">{ "Level" }</th>
-                        <th class="num">{ "Multiplier" }</th>
-                        <th class="num">{ "Next cost" }</th>
+                        <th>{ locale.tr(MessageId::LegacyColNode) }</th>
+                        <th class="num">{ locale.tr(MessageId::LegacyColLevel) }</th>
+                        <th class="num">{ locale.tr(MessageId::LegacyColMultiplier) }</th>
+                        <th class="num">{ locale.tr(MessageId::LegacyColNextCost) }</th>
                         <th>{ "" }</th>
                     </tr>
                 </thead>
@@ -1977,7 +1992,7 @@ where
                                 <td class="num">{ format!("{}★", cost) }</td>
                                 <td>
                                     <button onclick={cb} disabled={disabled}>
-                                        { "Buy" }
+                                        { locale.tr(MessageId::BtnBuy) }
                                     </button>
                                 </td>
                             </tr>
@@ -1986,9 +2001,9 @@ where
                 </tbody>
             </table>
             <div class="action-row">
-                <button class="danger" onclick={on_ascend}>{ "Ascend" }</button>
+                <button class="danger" onclick={on_ascend}>{ locale.tr(MessageId::BtnAscend) }</button>
                 <span class="muted small">
-                    { "Soft-reset: keep stars, level, missions, skills. Wipe gold, gear, Estate." }
+                    { locale.tr(MessageId::LegacyAscendBlurb) }
                 </span>
             </div>
         </section>

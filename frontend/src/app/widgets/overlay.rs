@@ -235,14 +235,14 @@ pub fn render_catchup_modal(
                 if n == 0 {
                     return None;
                 }
-                Some(html! { <li>{ format!("{}: {}", tier.name, n) }</li> })
+                Some(html! { <li>{ locale.fmt_estate_worker_line(tier.name, n) }</li> })
             })
             .collect();
         html! {
             <section>
-                <h3>{ "Estate" }</h3>
+                <h3>{ locale.tr(MessageId::PanelEstate) }</h3>
                 <p class="muted small">
-                    { "Active idle action: Estate." }
+                    { locale.fmt_estate_hint(&shared::form_name(inv.current_form).to_string()) }
                 </p>
                 <ul class="catchup-estate">{ for lines }</ul>
             </section>
@@ -254,7 +254,7 @@ pub fn render_catchup_modal(
         match patchnotes_for(current_version) {
             Some(notes) if !notes.is_empty() => html! {
                 <section>
-                    <h3>{ format!("What's new in v{}", current_version) }</h3>
+                    <h3>{ locale.fmt_whats_new(current_version) }</h3>
                     <ul>
                         { for notes.iter().map(|line| html! { <li>{ *line }</li> }) }
                     </ul>
@@ -267,9 +267,9 @@ pub fn render_catchup_modal(
             // case for incremental rebuilds.
             _ => html! {
                 <section>
-                    <h3>{ format!("Now running v{}", current_version) }</h3>
+                    <h3>{ locale.fmt_now_running(current_version) }</h3>
                     <p class="muted small">
-                        { "A newer build is live — no detailed changelog this time." }
+                        { locale.tr(MessageId::NewerBuildDesc) }
                     </p>
                 </section>
             },
@@ -280,12 +280,12 @@ pub fn render_catchup_modal(
     html! {
         <div class="onboarding-backdrop">
             <div class="onboarding-modal catchup-modal">
-                <h2>{ "Welcome back" }</h2>
+                <h2>{ locale.tr(MessageId::CatchupModalTitle) }</h2>
                 { catchup_block }
                 { estate_block }
                 { patchnotes_block }
                 <div class="action-row onboarding-actions">
-                    <button class="primary" onclick={on_dismiss}>{ "Got it" }</button>
+                    <button class="primary" onclick={on_dismiss}>{ locale.tr(MessageId::BtnGotIt) }</button>
                 </div>
             </div>
         </div>
