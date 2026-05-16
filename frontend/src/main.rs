@@ -103,7 +103,7 @@ fn app() -> Html {
                 shown_achievements: None,
                 // Wizard always opens at step 0 on cold load. The
                 // delegate's `LoadUiPrefs` reply (in
-                // `freenet::actions::ui_prefs::load_ui_prefs_once`)
+                // `freenet::actions::settings::load_settings_once`)
                 // closes it for returning players a few hundred ms
                 // later. Cost: a brief flash of step 0 on reload for
                 // returning users. Benefit: new players always see
@@ -117,6 +117,31 @@ fn app() -> Html {
             bump_setter.set(now_ms());
 
             connect_and_setup(core.clone(), pending.clone(), bump_setter.clone());
+
+            // Fallback timer: if `LoadUiPrefs` never replies (delegate
+            // unconfigured, WS handshake stalls, server unreachable),
+            // flip the gate after PREFS_LOAD_TIMEOUT_MS so the app
+            // still becomes usable on defaults instead of wedging on
+            // the loader. If the real reply lands first, this is a
+            // no-op (prefs_loaded already true).
+            {
+                let core = core.clone();
+                let bump = bump_setter.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    gloo_timers::future::TimeoutFuture::new(PREFS_LOAD_TIMEOUT_MS).await;
+                    let mut g = core.borrow_mut();
+                    if let Some(c) = g.as_mut() {
+                        if !c.prefs_loaded {
+                            web_sys::console::warn_1(
+                                &"LoadUiPrefs timeout — rendering with defaults".into(),
+                            );
+                            c.prefs_loaded = true;
+                            drop(g);
+                            bump.set(now_ms());
+                        }
+                    }
+                });
+            }
 
             // One Interval drives auto-mission, heartbeat publish and
             // pull-refresh. Each action gates itself by comparing
@@ -232,6 +257,18 @@ fn app() -> Html {
                                 c.last_pull_tick_ms = now;
                             }
                             pull_inventory_once(core.clone(), pending.clone(), bump.clone());
+                            // Workaround for the freenet-core regression where
+                            // `UpdateNotification` is never delivered for the
+                            // locally-hosted presence contract (observed
+                            // 2026-05-15, see pull_presence.rs). A bare Get
+                            // refreshes `c.others` from the local cache so
+                            // the leaderboard advances at `pull_ms` cadence
+                            // instead of staying frozen at the initial state.
+                            crate::freenet::actions::pull_presence::pull_presence_state_once(
+                                core.clone(),
+                                pending.clone(),
+                                bump.clone(),
+                            );
                         }
                     }
                 })
@@ -245,12 +282,37 @@ fn app() -> Html {
 
     let guard = (*core).borrow();
     let view = match guard.as_ref() {
+        // Hold rendering until the delegate's `LoadUiPrefs` reply has
+        // landed (`prefs_loaded`), so returning users don't see a
+        // flash of DEFAULT_NAME + parchment theme + onboarding step 0
+        // before their saved values arrive. The timeout fallback
+        // below flips the flag after PREFS_LOAD_TIMEOUT_MS so a
+        // wedged delegate never leaves the app stuck on the loader.
+        Some(c) if !c.prefs_loaded => boot_loader(c),
         Some(c) => render_core(c, (*core).clone(), (*pending).clone(), bump.setter()),
         None => html! { <p>{ "loading…" }</p> },
     };
     drop(guard);
     let _ = *bump;
     view
+}
+
+/// Boot-time loader rendered while the delegate's `LoadUiPrefs`
+/// round-trip is in flight. Reads `locale` from the localStorage-backed
+/// `c.prefs` (always populated synchronously on Core init) so the
+/// loader text is in the player's language even before the WS
+/// handshake completes. Theme is whatever `apply_theme(DEFAULT_THEME)`
+/// already applied at first paint — a brief parchment-loader flash
+/// before the saved theme takes over is far less jarring than the
+/// previous full-UI-then-snap behavior.
+fn boot_loader(c: &Core) -> Html {
+    use crate::app::i18n::MessageId;
+    let msg = c.prefs.locale.tr(MessageId::BootLoading);
+    html! {
+        <main class="boot-loader" aria-busy="true">
+            <p>{ msg }</p>
+        </main>
+    }
 }
 
 fn main() {

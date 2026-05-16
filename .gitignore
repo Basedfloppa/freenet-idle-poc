@@ -25,14 +25,13 @@ frontend/dist/
 frontend/dev-keys.json
 
 # =============================================================
-# Build artefact — `dev-publish.sh` / `prod-publish.sh` copies
-# the versioned delegate WASM here after `fdev build`. The
-# frontend fetches it at startup and auto-registers the delegate
-# on the local node (Scenario B: self-hosted users whose nodes
-# don't have the delegate pre-installed). Regenerated on every
-# (re-)publish.
+# Build artefacts — `dev-publish.sh` / `prod-publish.sh` copy the
+# versioned delegate + presence-contract WASM here after `fdev
+# build`. Frontend bundles them via trunk's copy-file rule.
+# Regenerated on every (re-)publish.
 # =============================================================
 frontend/identity_delegate.wasm
+frontend/presence_contract.wasm
 
 # =============================================================
 # Logs left by `dev-watch.sh` / `trunk serve` / various tests.
@@ -56,3 +55,6 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# Backup files emitted by prod-publish.sh on every patch of keys.rs.
+*.rs.bak

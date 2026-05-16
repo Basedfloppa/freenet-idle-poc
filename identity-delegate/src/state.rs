@@ -9,8 +9,10 @@ use ed25519_dalek::SigningKey;
 use freenet_stdlib::prelude::*;
 
 use shared::{
-    Inventory, InventoryV10, InventoryV9, InventoryWire, UiPrefs, UiPrefsV1, FORM_HUMAN,
-    IDENTITY_SECRET_ID, INVENTORY_SECRET_ID, STARTING_HP, UI_PREFS_SECRET_ID,
+    rpc::BlobKind, Inventory, InventoryV10, InventoryV9, InventoryWire, UiPrefs, UiPrefsV1,
+    BLOB_SECRET_ID_CHARACTER, BLOB_SECRET_ID_GAMESTATE, BLOB_SECRET_ID_INVENTORY,
+    BLOB_SECRET_ID_SETTINGS, FORM_HUMAN, IDENTITY_SECRET_ID, INVENTORY_SECRET_ID, STARTING_HP,
+    UI_PREFS_SECRET_ID,
 };
 
 use crate::derived::max_hp_of;
@@ -60,22 +62,16 @@ pub fn load_inventory_raw(ctx: &mut DelegateCtx) -> Inventory {
         return wire.into_latest();
     }
     if let Ok(inv_v9) = bincode::deserialize::<InventoryV9>(&bytes) {
-        return InventoryV10::from(inv_v9);
+        return shared::InventoryV11::from(InventoryV10::from(inv_v9));
     }
     Inventory::default()
 }
 
-/// Load UI prefs (display name + theme + locale + tutorial flag).
-/// Missing or malformed → `UiPrefs::default()`. Frontend falls back
-/// to its own defaults when a field is `None`.
-///
-/// Backward-compatibility: bincode 1 is length-prefixed and refuses
-/// to apply `#[serde(default)]` to truncated input, so blobs written
-/// by older delegate builds (3-field `UiPrefsV1`, no `locale`) fail
-/// the current 4-field decode. We try the current shape first and
-/// fall back to the legacy decoder, lifting it to `UiPrefs` with
-/// `locale = None`. The next `SaveUiPrefs` rewrites the blob in the
-/// new shape, so V1 fallback is a one-shot migration per user.
+/// Load legacy UiPrefs blob. Tries the current shape first, falls
+/// back to `UiPrefsV1` (pre-locale) — bincode 1 can't apply
+/// `#[serde(default)]` to truncated input. Used only by the
+/// one-shot migration path in `load_blob`; new code uses
+/// `BlobKind::Settings` JSON.
 pub fn load_ui_prefs(ctx: &mut DelegateCtx) -> UiPrefs {
     let Some(bytes) = ctx.get_secret(UI_PREFS_SECRET_ID) else {
         return UiPrefs::default();
@@ -99,10 +95,53 @@ pub fn save_ui_prefs(ctx: &mut DelegateCtx, prefs: &UiPrefs) -> Result<(), Strin
     Ok(())
 }
 
-/// Persist inventory always as the latest `InventoryWire` variant.
-/// Old bare-`Inventory` saves get promoted to the wrapper format the
-/// first time we save after the upgrade.
-pub fn save_inventory(ctx: &mut DelegateCtx, inv: &Inventory) -> Result<(), String> {
+fn blob_secret_id(kind: BlobKind) -> &'static [u8] {
+    match kind {
+        BlobKind::Settings => BLOB_SECRET_ID_SETTINGS,
+        BlobKind::GameState => BLOB_SECRET_ID_GAMESTATE,
+        BlobKind::Character => BLOB_SECRET_ID_CHARACTER,
+        BlobKind::Inventory => BLOB_SECRET_ID_INVENTORY,
+    }
+}
+
+/// Read the opaque blob for `kind`. Returns `None` if nothing's
+/// stored — caller applies its own defaults. The delegate doesn't
+/// interpret the bytes; schema is the caller's job.
+pub fn load_blob(ctx: &mut DelegateCtx, kind: BlobKind) -> Option<Vec<u8>> {
+    let id = blob_secret_id(kind);
+    if let Some(bytes) = ctx.get_secret(id) {
+        return Some(bytes);
+    }
+    // One-shot migration: legacy bincode `UiPrefs` -> JSON Settings.
+    if matches!(kind, BlobKind::Settings) {
+        let legacy = load_ui_prefs(ctx);
+        if legacy != UiPrefs::default() {
+            if let Ok(json) = serde_json::to_vec(&legacy) {
+                let _ = ctx.set_secret(id, &json);
+                return Some(json);
+            }
+        }
+    }
+    None
+}
+
+/// Replace the opaque blob for `kind` with `payload`. Caller is
+/// responsible for read-modify-write — the delegate does not merge.
+pub fn save_blob(ctx: &mut DelegateCtx, kind: BlobKind, payload: &[u8]) -> Result<(), String> {
+    let id = blob_secret_id(kind);
+    if !ctx.set_secret(id, payload) {
+        return Err("set_secret rejected".into());
+    }
+    Ok(())
+}
+
+/// Persist inventory as the latest `InventoryWire` variant.
+/// Recomputes the phased-reveal bitmask before serialization so
+/// newly-true predicates latch on disk and propagate back to the
+/// caller's in-memory copy.
+pub fn save_inventory(ctx: &mut DelegateCtx, inv: &mut Inventory) -> Result<(), String> {
+    let lvl = shared::level_of(inv);
+    let _flipped = shared::recompute_reveals(inv, lvl);
     let wire = InventoryWire::from(inv.clone());
     let bytes = bincode::serialize(&wire).map_err(|e| format!("ser inventory: {e}"))?;
     if !ctx.set_secret(INVENTORY_SECRET_ID, &bytes) {

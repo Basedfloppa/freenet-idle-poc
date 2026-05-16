@@ -35,6 +35,18 @@
          is the only way to provision a fresh node without the
          operator SSH'ing into it. -->
     <link data-trunk rel="copy-file" href="identity_delegate.wasm" />
+    <!-- Versioned presence-contract WASM, staged by prod-publish.sh
+         (cp from presence-contract/build/freenet/presence_contract).
+         Frontend Puts this on connect when the local node lacks a
+         cached contract code blob — needed for our un-hosting
+         workaround where orange/baka had `contracts/<code>.wasm`
+         deleted to break the locally-hosted update-propagation bug,
+         leaving state-store with state but no code. A GET with
+         `return_contract_code: true` does NOT re-persist code into
+         the contract handler's store, so we have to Put it
+         ourselves. The Put without `--release` semantic just
+         caches code locally — no DHT hosting announce. -->
+    <link data-trunk rel="copy-file" href="presence_contract.wasm" />
 </head>
 <body></body>
 </html>

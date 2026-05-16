@@ -85,7 +85,7 @@ pub fn render_core(
             // webapp iframe is null-origin in the default Freenet
             // sandbox, so the delegate is the only place this value
             // survives a reload.
-            crate::freenet::actions::ui_prefs::save_ui_prefs_once(
+            crate::freenet::actions::settings::save_settings_once(
                 core.clone(),
                 pending.clone(),
                 bump.clone(),
@@ -445,7 +445,7 @@ pub fn render_core(
                 if let Some(c) = core.borrow_mut().as_mut() {
                     c.current_theme = theme_id.to_string();
                 }
-                crate::freenet::actions::ui_prefs::save_ui_prefs_once(
+                crate::freenet::actions::settings::save_settings_once(
                     core.clone(),
                     pending.clone(),
                     bump.clone(),
@@ -462,7 +462,7 @@ pub fn render_core(
     // Locale picker callback factory. Mirrors mk_theme_cb: writes the
     // chosen locale to `UserPrefs.locale` (localStorage, for instant
     // re-render before the network round-trip lands) AND fires off a
-    // `save_ui_prefs_once` so the delegate stores it next to the
+    // `save_settings_once` so the delegate stores it next to the
     // theme. The delegate copy is what survives a fresh browser or a
     // cleared cache — localStorage in the sandboxed null-origin
     // iframe doesn't.
@@ -479,7 +479,7 @@ pub fn render_core(
                     c.prefs.locale = locale_from_code(code);
                     save_prefs(&c.prefs);
                 }
-                crate::freenet::actions::ui_prefs::save_ui_prefs_once(
+                crate::freenet::actions::settings::save_settings_once(
                     core.clone(),
                     pending.clone(),
                     bump.clone(),
@@ -654,7 +654,7 @@ pub fn render_core(
     // Onboarding wizard: advance step / dismiss. Each closure
     // mutates `c.onboarding_step` and re-bumps the view. The
     // "dismissed" flag is persisted via the delegate
-    // (`save_ui_prefs_once`) so it survives reload — localStorage
+    // (`save_settings_once`) so it survives reload — localStorage
     // can't be relied on inside the sandboxed iframe.
     let on_onboarding_next = {
         let core = core_cell.clone();
@@ -672,7 +672,7 @@ pub fn render_core(
                 }
             }
             if just_finished {
-                crate::freenet::actions::ui_prefs::save_ui_prefs_once(
+                crate::freenet::actions::settings::save_settings_once(
                     core.clone(),
                     pending.clone(),
                     bump.clone(),
@@ -693,7 +693,7 @@ pub fn render_core(
             if let Some(c) = core.borrow_mut().as_mut() {
                 c.onboarding_step = None;
             }
-            crate::freenet::actions::ui_prefs::save_ui_prefs_once(
+            crate::freenet::actions::settings::save_settings_once(
                 core.clone(),
                 pending.clone(),
                 bump.clone(),
@@ -827,24 +827,17 @@ pub fn render_core(
             <header class="page-head">
                 <div class="title-row">
                     <h1>{ "Freenet Idle PoC" }</h1>
-                    {
-                        // Show the webapp contract id (short prefix) when
-                        // served from a gateway — visible cue for which
-                        // release is running. Full id available via the
-                        // title attribute for copy/paste / diagnostics.
-                        // Hidden in trunk dev mode (page on :9003) where
-                        // the URL doesn't carry a contract id.
-                        if let Some(id) = webapp_contract_id() {
-                            let short = id.chars().take(8).collect::<String>();
-                            html! {
-                                <span class="webapp-version" title={id.clone()}>
-                                    { "v " }{ short }
-                                </span>
-                            }
-                        } else {
-                            html! {}
-                        }
-                    }
+                    // Show the crate semver from Cargo.toml — stable
+                    // and human-readable, unlike the previous
+                    // contract-id prefix which rotated on every
+                    // `fdev website publish` and gave no sense of
+                    // release order. The full webapp contract id is
+                    // still surfaced via the `title` attribute
+                    // (tooltip) for diagnostics: which DHT-resolved
+                    // bundle the user is actually running.
+                    <span class="webapp-version" title={webapp_contract_id().unwrap_or_default()}>
+                        { "v" }{ env!("CARGO_PKG_VERSION") }
+                    </span>
                     <span class={status_pill_cls}>{ status_pill_text }</span>
                     <a class="repo-link"
                        href="https://github.com/Basedfloppa/freenet-idle-poc"
@@ -857,7 +850,19 @@ pub fn render_core(
             </header>
 
             <nav class="top-actions">
-                { for top_actions(locale).iter().map(|(icon, label, tab)| {
+                { for top_actions(locale).iter().filter(|(_, _, tab)| {
+                    // Phased reveal (A5): tabs stay hidden until
+                    // their reveal-bit latches on. Farm / Settings /
+                    // Help are always shown so a fresh player has
+                    // somewhere to be.
+                    match tab {
+                        Tab::Farm | Tab::Settings | Tab::Help => true,
+                        Tab::WorldMap => inv.revealed_has(shared::RevealKey::WorldMap),
+                        Tab::Shop => inv.revealed_has(shared::RevealKey::Shop),
+                        Tab::Guilds => inv.revealed_has(shared::RevealKey::Guilds),
+                        Tab::Achievements => inv.revealed_has(shared::RevealKey::Achievements),
+                    }
+                }).map(|(icon, label, tab)| {
                     let is_active = c.current_tab == *tab;
                     let cls = if is_active { "icon-btn active" } else { "icon-btn" };
                     html! {
@@ -981,15 +986,29 @@ pub fn render_core(
                                             }>
                                         { locale.tr(MessageId::BtnRunMission) }
                                     </button>
-                                    <button onclick={on_toggle_auto}
-                                            disabled={my.is_none()}
-                                            title={
-                                                if inv.current_battle.is_some() {
-                                                    locale.tr(MessageId::TipAutoToggleMidFight)
-                                                } else { "" }
-                                            }>
-                                        { auto_label }
-                                    </button>
+                                    {
+                                        // Phased reveal (A5): the
+                                        // Auto-Mission toggle is hidden
+                                        // until the player has run
+                                        // 25 missions manually — first
+                                        // they should learn the loop,
+                                        // then they can automate it.
+                                        if inv.revealed_has(shared::RevealKey::AutoMission) {
+                                            html! {
+                                                <button onclick={on_toggle_auto}
+                                                        disabled={my.is_none()}
+                                                        title={
+                                                            if inv.current_battle.is_some() {
+                                                                locale.tr(MessageId::TipAutoToggleMidFight)
+                                                            } else { "" }
+                                                        }>
+                                                    { auto_label }
+                                                </button>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
                                 </div>
                                 {
                                     // Mid-fight queue + recent-turns ticker live
@@ -1023,78 +1042,97 @@ pub fn render_core(
                                 { render_combat_history(locale, &inv.combat_history) }
                             </article>
 
-                            <article class="panel equipment">
-                                <h2>{ locale.tr(MessageId::PanelEquipment) }</h2>
-                                <p class="muted small">{ locale.fmt_equipped_bonus(eq_atk, eq_def, eq_hp) }</p>
-                                <div class="action-row">
-                                    <button
-                                        onclick={on_auto_equip}
-                                        disabled={inv.unequipped.is_empty()}
-                                        title={locale.tr(MessageId::TipAutoEquipBest)}
-                                    >
-                                        { locale.tr(MessageId::BtnAutoEquipBest) }
-                                    </button>
-                                </div>
-                                <div class="slot-grid">
-                                    { for (0..SLOT_COUNT).map(|i| render_equipped_slot(locale, i, inv, &mk_unequip_cb)) }
-                                </div>
-                                {
-                                    if stash_count == 0 {
-                                        html! {
-                                            <p class="muted small">
-                                                { locale.fmt_no_spare_loot(shared::GEAR_DROP_EVERY as u32) }
-                                            </p>
-                                        }
-                                    } else {
-                                        html! {
-                                            <p class="muted small">
-                                                { locale.fmt_stash_count(stash_count) }
-                                            </p>
-                                        }
+                            // Phased reveal (A5): the Equipment panel
+                            // stays hidden until the player has either
+                            // a piece equipped or one in the stash.
+                            // Consumables sub-panel is nested inside
+                            // and is independently gated below.
+                            {
+                                if inv.revealed_has(shared::RevealKey::Equipment) {
+                                    html! {
+                                        <article class="panel equipment">
+                                            <h2>{ locale.tr(MessageId::PanelEquipment) }</h2>
+                                            <p class="muted small">{ locale.fmt_equipped_bonus(eq_atk, eq_def, eq_hp) }</p>
+                                            <div class="action-row">
+                                                <button
+                                                    onclick={on_auto_equip}
+                                                    disabled={inv.unequipped.is_empty()}
+                                                    title={locale.tr(MessageId::TipAutoEquipBest)}
+                                                >
+                                                    { locale.tr(MessageId::BtnAutoEquipBest) }
+                                                </button>
+                                            </div>
+                                            <div class="slot-grid">
+                                                { for (0..SLOT_COUNT).map(|i| render_equipped_slot(locale, i, inv, &mk_unequip_cb)) }
+                                            </div>
+                                            {
+                                                if stash_count == 0 {
+                                                    html! {
+                                                        <p class="muted small">
+                                                            { locale.fmt_no_spare_loot(shared::GEAR_DROP_EVERY as u32) }
+                                                        </p>
+                                                    }
+                                                } else {
+                                                    html! {
+                                                        <p class="muted small">
+                                                            { locale.fmt_stash_count(stash_count) }
+                                                        </p>
+                                                    }
+                                                }
+                                            }
+                                            {
+                                                if inv.revealed_has(shared::RevealKey::Consumables) {
+                                                    html! {
+                                                        <>
+                                                            <h3>{ locale.tr(MessageId::PanelConsumables) }</h3>
+                                                            <div class="consumable-row">
+                                                                <span class="consumable">
+                                                                    <span class="name">{ locale.tr(MessageId::ItemPotion) }</span>
+                                                                    <span class="qty">{ inv.potions }</span>
+                                                                    <button
+                                                                        onclick={on_use_potion}
+                                                                        disabled={inv.potions == 0}
+                                                                        title={
+                                                                            if inv.current_battle.is_some() {
+                                                                                locale.tr(MessageId::TipPotionQueue)
+                                                                            } else {
+                                                                                locale.tr(MessageId::TipPotionIdle)
+                                                                            }
+                                                                        }
+                                                                    >
+                                                                        { locale.tr(MessageId::BtnUse) }
+                                                                    </button>
+                                                                </span>
+                                                                <span class="consumable">
+                                                                    <span class="name">{ locale.tr(MessageId::ItemFireball) }</span>
+                                                                    <span class="qty">{ inv.fireballs }</span>
+                                                                    <button
+                                                                        onclick={on_use_fireball}
+                                                                        disabled={inv.fireballs == 0}
+                                                                        title={
+                                                                            if inv.current_battle.is_some() {
+                                                                                locale.tr(MessageId::TipFireballQueue).to_string()
+                                                                            } else {
+                                                                                locale.fmt_fireball_idle(FIREBALL_BOSS_DAMAGE)
+                                                                            }
+                                                                        }
+                                                                    >
+                                                                        { locale.tr(MessageId::BtnUse) }
+                                                                    </button>
+                                                                </span>
+                                                            </div>
+                                                        </>
+                                                    }
+                                                } else {
+                                                    html! {}
+                                                }
+                                            }
+                                        </article>
                                     }
+                                } else {
+                                    html! {}
                                 }
-                                <h3>{ locale.tr(MessageId::PanelConsumables) }</h3>
-                                // Single canonical position. Clicks route via
-                                // `mk_use_cb`: idle → `UseConsumable`, mid-battle
-                                // → `QueueBattleAction` (queue for next turn).
-                                // The tooltip flips to match the routed semantic.
-                                <div class="consumable-row">
-                                    <span class="consumable">
-                                        <span class="name">{ locale.tr(MessageId::ItemPotion) }</span>
-                                        <span class="qty">{ inv.potions }</span>
-                                        <button
-                                            onclick={on_use_potion}
-                                            disabled={inv.potions == 0}
-                                            title={
-                                                if inv.current_battle.is_some() {
-                                                    locale.tr(MessageId::TipPotionQueue)
-                                                } else {
-                                                    locale.tr(MessageId::TipPotionIdle)
-                                                }
-                                            }
-                                        >
-                                            { locale.tr(MessageId::BtnUse) }
-                                        </button>
-                                    </span>
-                                    <span class="consumable">
-                                        <span class="name">{ locale.tr(MessageId::ItemFireball) }</span>
-                                        <span class="qty">{ inv.fireballs }</span>
-                                        <button
-                                            onclick={on_use_fireball}
-                                            disabled={inv.fireballs == 0}
-                                            title={
-                                                if inv.current_battle.is_some() {
-                                                    locale.tr(MessageId::TipFireballQueue).to_string()
-                                                } else {
-                                                    locale.fmt_fireball_idle(FIREBALL_BOSS_DAMAGE)
-                                                }
-                                            }
-                                        >
-                                            { locale.tr(MessageId::BtnUse) }
-                                        </button>
-                                    </span>
-                                </div>
-                            </article>
+                            }
                         </section>
 
                         <section class="panel plot">
@@ -1115,21 +1153,31 @@ pub fn render_core(
                             <p>{ chap_body_farm }</p>
                         </section>
 
-                        <section class="panel boss">
-                            <h2>{ locale.tr(MessageId::PanelWorldBoss) }</h2>
-                            <div class="hp-bar">
-                                <div class="hp-fill" style={format!("width: {boss_pct}%")}></div>
-                            </div>
-                            <p class="muted">
-                                { locale.fmt_boss_summary(
-                                    boss_era,
-                                    &format_si(boss_hp),
-                                    &format_si(boss_max_hp),
-                                    &format_si(total_dmg),
-                                    rows.len(),
-                                ) }
-                            </p>
-                        </section>
+                        // Phased reveal (A5): World Boss panel
+                        // appears at mission_count ≥ 10.
+                        {
+                            if inv.revealed_has(shared::RevealKey::WorldBoss) {
+                                html! {
+                                    <section class="panel boss">
+                                        <h2>{ locale.tr(MessageId::PanelWorldBoss) }</h2>
+                                        <div class="hp-bar">
+                                            <div class="hp-fill" style={format!("width: {boss_pct}%")}></div>
+                                        </div>
+                                        <p class="muted">
+                                            { locale.fmt_boss_summary(
+                                                boss_era,
+                                                &format_si(boss_hp),
+                                                &format_si(boss_max_hp),
+                                                &format_si(total_dmg),
+                                                rows.len(),
+                                            ) }
+                                        </p>
+                                    </section>
+                                }
+                            } else {
+                                html! {}
+                            }
+                        }
 
                         <section class="panel resources">
                             <h2>{ locale.tr(MessageId::PanelResources) }</h2>
@@ -1152,7 +1200,7 @@ pub fn render_core(
                                 { locale.fmt_currently_farming(i18n_shared::area_name(locale, area), lvl) }
                             </p>
                             <div class="area-grid">
-                                { for AREAS.iter().map(|a| render_area_card(locale, a, inv.current_area, lvl, &mk_set_area_cb)) }
+                                { for AREAS.iter().map(|a| render_area_card(locale, a, inv.current_area, lvl, inv, &mk_set_area_cb)) }
                             </div>
                         </section>
                         <section class="panel plot">

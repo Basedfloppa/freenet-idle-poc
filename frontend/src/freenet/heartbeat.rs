@@ -7,10 +7,11 @@
 //!     unlocked while the tab was idle, cross-tab state changes).
 
 use freenet_stdlib::client_api::{ClientRequest, ContractRequest};
-use freenet_stdlib::prelude::{StateDelta, UpdateData};
+use freenet_stdlib::prelude::{State, UpdateData};
 use shared::{
-    ContractDelta, DelegateRequest as AppRequest, DelegateResponse as AppResponse, SignedEntry,
+    ContractState, DelegateRequest as AppRequest, DelegateResponse as AppResponse, SignedEntry,
 };
+use std::collections::BTreeMap;
 use wasm_bindgen_futures::spawn_local;
 use yew::UseStateSetter;
 
@@ -18,13 +19,7 @@ use crate::delegate_client;
 use crate::{now_ms, CoreCell, PendingCell};
 
 pub fn heartbeat_once(core: CoreCell, pending: PendingCell, bump: UseStateSetter<u64>) {
-    // We no longer pre-build the payload on the webapp side — the
-    // delegate is authoritative. Pull only the fields the player
-    // owns (`name`) plus the WS handles and contract key.
-    //
-    // No contract key = single-player mode = nothing to publish.
-    // The delegate still tracks our inventory locally, but no
-    // aggregator contract is listening.
+    // No contract key = single-player mode, nothing to publish.
     let (ws, name, delegate_key, contract_key) = {
         let g = core.borrow();
         let Some(c) = g.as_ref() else { return };
@@ -32,23 +27,15 @@ pub fn heartbeat_once(core: CoreCell, pending: PendingCell, bump: UseStateSetter
         if c.pubkey.is_none() {
             return;
         }
-        // Block the first publish until the delegate's `LoadUiPrefs`
-        // reply has merged the persisted display name into Core.
-        // Without this, the unified-tick fires within ~1s of pubkey
-        // landing — well before `LoadUiPrefs` round-trips — and the
-        // first presence entry on the leaderboard ships
-        // `DEFAULT_NAME` even for returning users who saved a name
-        // long ago.
+        // Gate first publish on settings-load so we ship the saved
+        // display name, not the `DEFAULT_NAME` placeholder.
         if !c.prefs_loaded {
             return;
         }
-        let Some(contract_key) = c.contract_key.clone() else { return };
-        (
-            ws,
-            c.name.clone(),
-            c.delegate_key.clone(),
-            contract_key,
-        )
+        let Some(contract_key) = c.contract_key.clone() else {
+            return;
+        };
+        (ws, c.name.clone(), c.delegate_key.clone(), contract_key)
     };
 
     spawn_local(async move {
@@ -88,15 +75,31 @@ pub fn heartbeat_once(core: CoreCell, pending: PendingCell, bump: UseStateSetter
             }
         };
 
-        let signed = SignedEntry { payload: payload_bytes, signature };
-        let delta = ContractDelta { entries: vec![signed] };
-        let delta_bytes = match bincode::serialize(&delta) {
+        // Single-entry `ContractState`; contract's `update_state`
+        // merges additively, so a partial state acts as a delta.
+        let signed = SignedEntry {
+            payload: payload_bytes,
+            signature,
+        };
+        let pubkey = signed
+            .decode()
+            .map(|p| p.public_key)
+            .unwrap_or_default();
+        let mut entries: BTreeMap<_, _> = BTreeMap::new();
+        entries.insert(pubkey, signed);
+        let state = ContractState {
+            version: shared::CONTRACT_STATE_VERSION,
+            entries,
+            cumulative_damage: BTreeMap::new(),
+        };
+        let state_bytes = match bincode::serialize(&state) {
             Ok(b) => b,
             Err(_) => return,
         };
+        let delta_len = state_bytes.len();
         let req = ClientRequest::ContractOp(ContractRequest::Update {
             key: contract_key,
-            data: UpdateData::Delta(StateDelta::from(delta_bytes)),
+            data: UpdateData::State(State::from(state_bytes)),
         });
         let result = ws.borrow_mut().send(req).await;
         if let Some(c) = core.borrow_mut().as_mut() {
@@ -105,8 +108,23 @@ pub fn heartbeat_once(core: CoreCell, pending: PendingCell, bump: UseStateSetter
                     c.last_published_ms = Some(now_ms());
                     c.last_published = c.inventory.clone();
                     c.status = "subscribed".into();
+                    let my_prefix = c
+                        .pubkey
+                        .map(|pk| hex::encode(&pk[..4]))
+                        .unwrap_or_else(|| "none".to_string());
+                    web_sys::console::log_1(
+                        &format!(
+                            "[presence] published heartbeat ts={ts} delta_bytes={delta_len} my={my_prefix}"
+                        )
+                        .into(),
+                    );
                 }
-                Err(e) => c.status = format!("publish error: {e:?}"),
+                Err(e) => {
+                    web_sys::console::warn_1(
+                        &format!("[presence] heartbeat publish error: {e:?}").into(),
+                    );
+                    c.status = format!("publish error: {e:?}");
+                }
             }
         }
         bump.set(now_ms());

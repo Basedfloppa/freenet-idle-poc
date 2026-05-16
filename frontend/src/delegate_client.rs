@@ -9,9 +9,10 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use freenet_stdlib::client_api::{ClientRequest, DelegateRequest};
+use freenet_stdlib::client_api::{ClientRequest, ContractRequest, DelegateRequest};
 use freenet_stdlib::prelude::{
-    ApplicationMessage, CodeHash, DelegateContainer, DelegateKey, InboundDelegateMsg, Parameters,
+    ApplicationMessage, CodeHash, ContractContainer, DelegateContainer, DelegateKey,
+    InboundDelegateMsg, Parameters, RelatedContracts, WrappedState,
 };
 use shared::{
     DelegateEnvelopeIn, DelegateEnvelopeOut, DelegateRequest as AppRequest,
@@ -185,15 +186,46 @@ pub async fn ensure_delegate_registered(ws: WsCell) -> Result<(), String> {
 }
 
 async fn fetch_bundled_delegate_wasm() -> Result<Vec<u8>, String> {
+    fetch_bundled_wasm("./identity_delegate.wasm").await
+}
+
+/// Fetch the presence-contract WASM staged into `dist/` by
+/// `prod-publish.sh` (or `dev-publish.sh`). Same bundling pattern as
+/// the delegate — gateway serves it as a static asset.
+async fn fetch_bundled_presence_contract_wasm() -> Result<Vec<u8>, String> {
+    fetch_bundled_wasm("./presence_contract.wasm").await
+}
+
+// Process-lifetime cache: container is immutable for the page's
+// lifetime, no point reparsing the 200KB blob on every Put.
+thread_local! {
+    static PRESENCE_CONTAINER: RefCell<Option<ContractContainer>> = const { RefCell::new(None) };
+}
+
+/// Fetch + parse the presence-contract WASM once; subsequent calls
+/// return cheap `Arc`-clones from the cache.
+pub async fn get_or_init_presence_contract_container() -> Result<ContractContainer, String> {
+    if let Some(c) = PRESENCE_CONTAINER.with(|c| c.borrow().clone()) {
+        return Ok(c);
+    }
+    let bytes = fetch_bundled_presence_contract_wasm().await?;
+    let params: Parameters<'static> = Parameters::from(Vec::<u8>::new());
+    let container = ContractContainer::try_from((bytes, &params))
+        .map_err(|e| format!("decode versioned contract: {e}"))?;
+    PRESENCE_CONTAINER.with(|c| *c.borrow_mut() = Some(container.clone()));
+    Ok(container)
+}
+
+async fn fetch_bundled_wasm(path: &str) -> Result<Vec<u8>, String> {
     let win = web_sys::window().ok_or("no window")?;
-    let resp_val = JsFuture::from(win.fetch_with_str("./identity_delegate.wasm"))
+    let resp_val = JsFuture::from(win.fetch_with_str(path))
         .await
-        .map_err(|e| format!("fetch: {e:?}"))?;
+        .map_err(|e| format!("fetch {path}: {e:?}"))?;
     let response: Response = resp_val
         .dyn_into()
         .map_err(|_| "not a Response".to_string())?;
     if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(format!("HTTP {} for {path}", response.status()));
     }
     let buf_promise = response
         .array_buffer()
@@ -205,6 +237,52 @@ async fn fetch_bundled_delegate_wasm() -> Result<Vec<u8>, String> {
         .dyn_into()
         .map_err(|_| "not an ArrayBuffer".to_string())?;
     Ok(Uint8Array::new(&buf).to_vec())
+}
+
+/// PUT the bundled presence-contract WASM into the local node's
+/// store so a fresh-install node doesn't need operator intervention.
+/// Fire-and-forget; missing dist asset (dev mode) is logged + ignored.
+pub async fn ensure_presence_contract_published(
+    ws: WsCell,
+    contract_id_b58: &str,
+) -> Result<(), String> {
+    let container = match get_or_init_presence_contract_container().await {
+        Ok(c) => c,
+        Err(e) => {
+            web_sys::console::warn_1(
+                &format!("[contract-publish] skipping auto-publish: {e}").into(),
+            );
+            return Ok(());
+        }
+    };
+
+    // Empty-but-validly-encoded state — contract's `validate_state`
+    // rejects raw empty bytes; `update_state` is additive so this
+    // won't clobber existing DHT-fetched entries.
+    let empty_state = shared::ContractState {
+        version: shared::CONTRACT_STATE_VERSION,
+        entries: std::collections::BTreeMap::new(),
+        cumulative_damage: std::collections::BTreeMap::new(),
+    };
+    let state_bytes = bincode::serialize(&empty_state)
+        .map_err(|e| format!("serialize empty ContractState: {e}"))?;
+
+    let req = ClientRequest::ContractOp(ContractRequest::Put {
+        contract: container,
+        state: WrappedState::new(state_bytes),
+        related_contracts: RelatedContracts::default(),
+        subscribe: false,
+        blocking_subscribe: false,
+    });
+
+    ws.borrow_mut()
+        .send(req)
+        .await
+        .map_err(|e| format!("ws send Put: {e:?}"))?;
+    web_sys::console::log_1(
+        &format!("[contract-publish] Put sent for {contract_id_b58} (fire-and-forget)").into(),
+    );
+    Ok(())
 }
 
 pub async fn call(

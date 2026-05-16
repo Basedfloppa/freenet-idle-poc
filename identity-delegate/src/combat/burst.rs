@@ -114,6 +114,9 @@ fn resolve_encounter_burst(
     inv.current_hp = player_hp;
     if outcome == COMBAT_OUTCOME_WIN {
         inv.mission_count = inv.mission_count.saturating_add(1);
+        // Per-area clear counter — feeds the unlock-gate for the
+        // next area (A3 in `docs/gameplay-backlog.md`).
+        inv.area_clears_inc(area.id);
         inv.gold = inv.gold.saturating_add(gold_gained);
         inv.essence = inv
             .essence

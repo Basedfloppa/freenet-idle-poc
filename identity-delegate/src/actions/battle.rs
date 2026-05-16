@@ -25,7 +25,7 @@ pub fn set_auto_run(
     catch_up_auto(&mut inv, now_ms);
     inv.auto_run_enabled = enabled;
     inv.auto_last_tick_ms = if enabled { now_ms } else { 0 };
-    save_inventory(ctx, &inv)?;
+    save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }
 
@@ -137,7 +137,7 @@ pub fn queue_battle_action(
     if !crate::combat::queue_action(&mut inv, action) {
         return Err("no active battle to queue an action on".into());
     }
-    save_inventory(ctx, &inv)?;
+    save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }
 
@@ -152,6 +152,6 @@ pub fn tick_only(ctx: &mut DelegateCtx, now_ms: u64) -> Result<Inventory, String
     let mut inv = load_inventory_raw(ctx);
     enter_action(&mut inv, now_ms)?;
     crate::combat::tick_battle(&mut inv, now_ms);
-    save_inventory(ctx, &inv)?;
+    save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }

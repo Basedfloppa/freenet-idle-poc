@@ -38,4 +38,18 @@ pub const INVENTORY_SECRET_ID: &[u8] = b"inventory-v9";
 /// prefs). Separate from inventory so a schema bump on either side
 /// doesn't reset the other. The delegate stores a bincode'd
 /// [`crate::rpc::UiPrefs`] under this key.
+///
+/// **Legacy.** The new path is `BLOB_SECRET_ID_SETTINGS` (opaque JSON)
+/// — see `crate::rpc::BlobKind`. This key is retained so the new
+/// delegate can serve a one-time migration read for users who saved
+/// under it before the blob protocol existed.
 pub const UI_PREFS_SECRET_ID: &[u8] = b"ui-prefs-v1";
+
+/// Per-domain secret ids for the blob protocol (`crate::rpc::BlobKind`).
+/// Names match the enum discriminants so the mapping is obvious; the
+/// `-v1` suffix lets us re-key a domain if we ever need a hard reset
+/// of just that slice without rotating the whole delegate.
+pub const BLOB_SECRET_ID_SETTINGS: &[u8] = b"blob/settings-v1";
+pub const BLOB_SECRET_ID_GAMESTATE: &[u8] = b"blob/gamestate-v1";
+pub const BLOB_SECRET_ID_CHARACTER: &[u8] = b"blob/character-v1";
+pub const BLOB_SECRET_ID_INVENTORY: &[u8] = b"blob/inventory-v1";

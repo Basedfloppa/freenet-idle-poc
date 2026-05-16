@@ -166,6 +166,17 @@ cp "$HERE/identity-delegate/build/freenet/identity_delegate" \
    "$HERE/frontend/identity_delegate.wasm"
 echo "[prod-publish] copied identity_delegate to frontend/identity_delegate.wasm"
 
+# Stage the freshly-built presence-contract WASM into the frontend
+# the same way. The webapp Puts the bundled container on connect
+# (and on every heartbeat, as a workaround for the freenet-core
+# Update-silently-dropped bug) — without this copy the bundle ships
+# with the previous run's contract code, so the Put lands under the
+# OLD contract_id while the Get/Subscribe targets the NEW id, and
+# heartbeats never reach the new contract's state store.
+cp "$HERE/presence-contract/build/freenet/presence_contract" \
+   "$HERE/frontend/presence_contract.wasm"
+echo "[prod-publish] copied presence_contract to frontend/presence_contract.wasm"
+
 ###############################################################################
 # Patch frontend/src/app/keys.rs so the compile-time defaults match
 # what we just published. The release build picks these up — even if

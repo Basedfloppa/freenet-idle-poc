@@ -14,11 +14,11 @@ use web_sys::Response;
 // puts cleanly; once the fdev release with #4075 lands, anyone
 // republishing from a fresh checkout will get the same ids back
 // (they're deterministic from the WASM hash).
-pub const CONTRACT_ID_B58: &str = "9a3JA8E6FBrjM67HBvQpp7PZqiaQEeeqv9Cj3Qgv1pBV";
-pub const CODE_HASH_B58: &str = "CPNeMpgRzE9ePwXwzbwg3FoEYkAMGNkAPDtAc5qXo9Ex";
+pub const CONTRACT_ID_B58: &str = "27XWzSxqZeYnAULVbq1E9vnNwyhbdP6xDPWF4MmNo7vA";
+pub const CODE_HASH_B58: &str = "EUy2ppPmDXP62EkEaSttG14tUtnLc7hWSQUhHqtP2orv";
 
-pub const DELEGATE_KEY_B58: &str = "JDRtaPy3N5SRXFVenSKotx4GnM55sArc12euVqvH8qPd";
-pub const DELEGATE_CODE_HASH_B58: &str = "5QVhwBwSo5ApSUtbttbubeuTqZA4vKtdbCujaF4RzPPy";
+pub const DELEGATE_KEY_B58: &str = "5Us6wxvEhosVFGdZg3VMrZgBUDsXgbnzSNf64Av6y6Y3";
+pub const DELEGATE_CODE_HASH_B58: &str = "6VnPy9jmkyQ5BLJeSVAoK5y9F6msqwhDsvkLPXaervcw";
 
 /// Mailbox contract — payload-agnostic player-to-player message
 /// bus. Subscribed on connect like the presence contract.

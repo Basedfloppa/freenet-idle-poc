@@ -36,6 +36,15 @@ pub const MAX_TIMESTAMP_MS: u64 = 4_102_444_800_000;
 /// pivot.
 pub const MAX_FORWARD_SKEW_MS: u64 = 5 * 60 * 1000;
 
+/// Entries silent for longer than this (relative to a freshly observed
+/// timestamp) are considered dormant. Used by `apply()` to bypass the
+/// forward-skew check when the only existing entry is far older than
+/// the incoming payload — without this, a single stale entry that
+/// `prune_stale` can't evict (because `prune_stale` only runs with ≥2
+/// entries) becomes a permanent skew anchor blocking all new writes.
+/// Same value the contract uses for its own `prune_stale` call.
+pub const MAX_STALE_MS: u64 = 60 * 1000;
+
 /// Hard cap on the size of the live `entries` map. Once this many
 /// distinct publishers are present, additions from *new* pubkeys are
 /// refused (existing publishers may still refresh their slot).
@@ -196,13 +205,30 @@ impl ContractState {
         // Relative ceiling against the freshest existing entry.
         // Bootstrap (no entries yet) trusts the first publisher — the
         // absolute ceiling above still caps abuse.
+        //
+        // Stale-singleton escape hatch: if `max_existing` is more than
+        // `MAX_STALE_MS` behind the incoming `payload.timestamp_ms`,
+        // the network is effectively dormant — treat the incoming
+        // entry as a bootstrap and skip the skew check. Without this,
+        // a single old entry (e.g., a third-party publisher who
+        // went idle days ago) becomes a permanent "skew anchor" that
+        // silently rejects every fresh entry, because `prune_stale`
+        // only runs when ≥2 entries are present and so cannot evict
+        // the lone stale singleton. The skew rule's original intent
+        // — guard against a clock-skewed adversary publishing into
+        // the future — still holds for active networks; only the
+        // dormant edge case is relaxed here.
         if let Some(max_existing) = self
             .entries
             .values()
             .filter_map(|e| e.decode().map(|p| p.timestamp_ms))
             .max()
         {
-            if payload.timestamp_ms > max_existing.saturating_add(MAX_FORWARD_SKEW_MS) {
+            let max_existing_is_fresh =
+                payload.timestamp_ms <= max_existing.saturating_add(MAX_STALE_MS);
+            if max_existing_is_fresh
+                && payload.timestamp_ms > max_existing.saturating_add(MAX_FORWARD_SKEW_MS)
+            {
                 return false;
             }
         }

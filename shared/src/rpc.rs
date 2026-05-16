@@ -129,13 +129,63 @@ pub enum DelegateRequest {
     },
     /// Read the persisted UI prefs blob (display name + theme).
     /// Returns `[UiPrefs::default()`] if nothing's stored yet.
+    ///
+    /// **Deprecated** in favour of `LoadBlob { kind: BlobKind::Settings }`.
+    /// Kept for one migration cycle so cached webapp builds still talk
+    /// to the upgraded delegate. The new path uses JSON-encoded blobs
+    /// which let the frontend evolve its schema without re-publishing
+    /// the delegate (no `delegate_key` rotation, no identity loss).
     LoadUiPrefs,
     /// Replace the persisted UI prefs blob with the supplied one.
-    /// Sandbox iframes default to a "null" origin which breaks
-    /// localStorage persistence across reloads (manifest-driven
-    /// `allow-same-origin` opt-in is being reverted upstream), so the
-    /// authoritative copy lives next to the inventory on the node.
+    ///
+    /// **Deprecated** — see `LoadUiPrefs` note. Use
+    /// `SaveBlob { kind: BlobKind::Settings, payload: <JSON bytes> }`.
     SaveUiPrefs { prefs: UiPrefs },
+
+    /// Read the JSON-encoded blob for `kind`. Returns
+    /// `AppResponse::Blob { payload: None }` if nothing's stored yet,
+    /// so callers can apply their own defaults. The delegate treats
+    /// the bytes as opaque — schema evolution lives entirely on the
+    /// caller side via `#[serde(default)]` + ignored unknown fields.
+    ///
+    /// Adding a new `BlobKind` variant still requires a delegate
+    /// rebuild (and `delegate_key` rotation per #4117). Adding a new
+    /// field WITHIN an existing kind is frontend-only.
+    LoadBlob { kind: BlobKind },
+    /// Persist `payload` (JSON bytes, opaque) under `kind`. Read-modify-
+    /// write is the caller's responsibility — the delegate does not
+    /// merge; each save replaces the entire blob for that kind.
+    SaveBlob { kind: BlobKind, payload: Vec<u8> },
+}
+
+/// Domain split for blob-encoded persisted state. Each variant maps
+/// to a separate secret-store slot on the delegate. Adding a new
+/// variant is the only change that requires re-publishing the delegate;
+/// growing the JSON inside an existing variant is frontend-only.
+///
+/// `repr(u8)` + explicit discriminants pin the wire format so the
+/// delegate and frontend can be built independently and still agree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum BlobKind {
+    /// UI preferences: display name, theme, locale, tutorial-dismissed,
+    /// future per-player cosmetic toggles. Delegate stores opaque,
+    /// frontend owns the schema.
+    Settings = 0,
+    /// Per-run game state the webapp wants to survive reloads but
+    /// that's NOT part of the authoritative `Inventory` (e.g.
+    /// "currently viewing tab", expanded panel state).
+    GameState = 1,
+    /// Identity / account metadata the webapp wants to attach to the
+    /// pubkey but that isn't part of `Inventory` (e.g. avatar choice,
+    /// pronouns). Survives reset-progress.
+    Character = 2,
+    /// Future home for the inventory blob. Currently delegate still
+    /// owns typed `Inventory` for `RunMission`; this slot is reserved
+    /// for the eventual move to JSON-on-the-wire so frontend can grow
+    /// cosmetic fields without delegate cooperation. Not yet wired —
+    /// requesting today returns `AppResponse::Error`.
+    Inventory = 3,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,6 +232,16 @@ pub enum DelegateResponse {
     /// Reply to `LoadUiPrefs` / `SaveUiPrefs` — the canonical prefs
     /// snapshot held by the delegate.
     UiPrefs(UiPrefs),
+    /// Reply to `LoadBlob` — the opaque JSON-encoded bytes for the
+    /// requested domain, or `None` if no save has happened yet.
+    Blob {
+        kind: BlobKind,
+        payload: Option<Vec<u8>>,
+    },
+    /// Reply to `SaveBlob` — echoes the kind that was just written
+    /// so the caller can correlate concurrent saves. No payload echo
+    /// — the caller already has the bytes it just sent.
+    BlobSaved { kind: BlobKind },
     Error(String),
 }
 

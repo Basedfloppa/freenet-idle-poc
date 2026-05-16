@@ -1267,11 +1267,19 @@ table.buy-grid tr.disabled-row button { cursor: not-allowed; }
     margin: 0.4em 0 0.2em;
 }
 .consumable {
+    /* Two-row stack: localized item name spans the full width on
+       row 1, the qty number and the Use button share row 2. This
+       avoids the older 1fr-auto layout where the auto track for a
+       long button label (RU "Использовать" is 4× the width of EN
+       "Use") squeezed the name column down so far it wrapped
+       letter-by-letter. With the name pinned to its own full-width
+       row, row 2 is just one number + one button — both small
+       enough to fit even in the narrow 3-column equipment panel. */
     display: grid;
     grid-template-columns: 1fr auto;
     grid-template-rows: auto auto;
     column-gap: 0.4em;
-    row-gap: 0.15em;
+    row-gap: 0.2em;
     align-items: center;
     background: var(--bg-card);
     border: 1px solid var(--border-soft);
@@ -1279,14 +1287,19 @@ table.buy-grid tr.disabled-row button { cursor: not-allowed; }
     padding: 0.35em 0.55em;
     min-height: 46px;
     font-size: 0.85em;
+    /* Grid items default to `min-width: auto` (their intrinsic
+       content size); zeroing it lets the cell shrink below long
+       labels rather than blowing out the row. */
+    min-width: 0;
 }
 .consumable .name {
     color: var(--fg-muted);
     font-size: 0.72em;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    grid-column: 1;
+    grid-column: 1 / span 2;
     grid-row: 1;
+    min-width: 0;
 }
 .consumable .qty {
     font-variant-numeric: tabular-nums;
@@ -1297,10 +1310,16 @@ table.buy-grid tr.disabled-row button { cursor: not-allowed; }
 }
 .consumable button {
     grid-column: 2;
-    grid-row: 1 / span 2;
+    grid-row: 2;
     font-size: 0.82em;
     padding: 0.2em 0.6em;
-    align-self: center;
+    justify-self: end;
+    /* Allow the localized label to wrap inside the button when the
+       cell is too narrow (extreme RU widths under the narrow
+       3-column equipment panel) rather than overflowing the
+       cell. */
+    white-space: normal;
+    line-height: 1.1;
 }
 
 /* Plot So Far panel. */
@@ -1403,3 +1422,57 @@ table.inventory td.num {
 }
 .badge.live { background: var(--accent-win-bg); color: var(--accent-win); }
 .badge.stale { background: var(--pill-recovering-bg); color: var(--pill-recovering-fg); }
+
+/* Boot-time loader shown until the delegate's LoadUiPrefs reply
+   lands (or PREFS_LOAD_TIMEOUT_MS elapses). Sized to feel like a
+   placeholder for the main UI rather than a chrome-corner notice. */
+.boot-loader {
+    display: grid;
+    place-items: center;
+    min-height: 100vh;
+    padding: 24px;
+    color: var(--fg-soft);
+    font-size: 1.1em;
+    font-style: italic;
+    background: var(--bg-page);
+}
+
+/* ============================================================
+ * Scrollbars.
+ *
+ * Override the OS-native scrollbar so it tracks the active theme
+ * instead of clashing with parchment/dusk/forest backgrounds.
+ * Firefox uses `scrollbar-{width,color}`; Chromium/WebKit needs
+ * `::-webkit-scrollbar*`. Both are duplicated here so the styling
+ * survives a vendor switch. `transparent` track lets the underlying
+ * panel show through (no double-border seam against `--bg-panel`).
+ * Colors come from theme tokens so dusk/forest get appropriate
+ * dark thumbs without per-theme overrides.
+ * ============================================================ */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-soft) transparent;
+}
+*::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+    background: var(--border-soft);
+    border-radius: 5px;
+    /* Inset border creates breathing room around the thumb against
+       the track without painting a visible border — same trick used
+       by GitHub / VSCode for thin tasteful scrollbars. */
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+    background: var(--fg-muted);
+    background-clip: content-box;
+}
+*::-webkit-scrollbar-corner {
+    background: transparent;
+}

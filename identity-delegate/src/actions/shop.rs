@@ -37,7 +37,7 @@ pub fn use_consumable(
         other => return Err(format!("unknown consumable kind {other}")),
     }
     check_achievements(&mut inv, now_ms);
-    save_inventory(ctx, &inv)?;
+    save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }
 
@@ -62,7 +62,7 @@ pub fn buy_item(
     } else {
         inv.fireballs = inv.fireballs.saturating_add(1);
     }
-    save_inventory(ctx, &inv)?;
+    save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }
 
@@ -86,6 +86,6 @@ pub fn buy_skill(
     inv.current_hp = inv.current_hp.min(max_hp_of(&inv));
     check_achievements(&mut inv, now_ms);
     check_endings(&mut inv, now_ms, None);
-    save_inventory(ctx, &inv)?;
+    save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }

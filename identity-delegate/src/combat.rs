@@ -72,6 +72,6 @@ pub fn run_mission(
     tick_battle(&mut inv, now_ms);
     // Player engaged — clear the "while you were away" banner.
     inv.last_catchup = None;
-    save_inventory(ctx, &inv)?;
+    save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }

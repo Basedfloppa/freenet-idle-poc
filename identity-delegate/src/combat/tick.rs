@@ -245,7 +245,12 @@ fn run_one_turn(inv: &mut Inventory, turn_ms: u64) -> TurnOutcome {
     inv.current_hp = if healed { max_hp } else { player_hp };
 
     // Write the turn back to the battle log + update its HP / clock.
+    // Reach through `.base` so the borrow checker splits the two
+    // field borrows (`current_battle` mut + `current_hp` immut)
+    // instead of seeing a single whole-struct borrow through Deref.
+    let player_hp_now = inv.current_hp;
     let battle = inv
+        .base
         .current_battle
         .as_mut()
         .expect("current_battle present from caller");
@@ -259,7 +264,7 @@ fn run_one_turn(inv: &mut Inventory, turn_ms: u64) -> TurnOutcome {
             player_dmg: player_dmg_this_turn.min(u32::MAX as u64) as u32,
             enemy_dmg: enemy_dmg_this_turn.min(u32::MAX as u64) as u32,
             enemy_hp_after: enemy_hp,
-            player_hp_after: inv.current_hp,
+            player_hp_after: player_hp_now,
         },
     );
 
@@ -281,6 +286,9 @@ fn end_encounter_win(inv: &mut Inventory, enemy_id: u16, turn_ms: u64) {
     let Some(enemy) = enemy_def(enemy_id).copied() else { return };
     let gold_gained = enemy.gold_reward.saturating_mul(area.gold_mult);
     inv.mission_count = inv.mission_count.saturating_add(1);
+    // Per-area clear counter — feeds the unlock-gate for the
+    // next area (A3 in `docs/gameplay-backlog.md`).
+    inv.area_clears_inc(area.id);
     inv.gold = inv.gold.saturating_add(gold_gained);
     inv.essence = inv
         .essence
@@ -348,13 +356,17 @@ fn end_encounter_win(inv: &mut Inventory, enemy_id: u16, turn_ms: u64) {
 /// from the roster. If we've finished `ENCOUNTERS_PER_MISSION`, end
 /// the battle (clear `current_battle`).
 fn advance_to_next_encounter(inv: &mut Inventory, turn_ms: u64) {
-    let Some(battle) = inv.current_battle.as_mut() else { return };
+    // Capture the area id before the mutable borrow on
+    // `current_battle` — Deref through V11→V10 doesn't field-split,
+    // so we'd otherwise borrow-check-fail on `inv.current_area`.
+    let area_id = inv.current_area;
+    let Some(battle) = inv.base.current_battle.as_mut() else { return };
     battle.encounter_idx = battle.encounter_idx.saturating_add(1);
     if battle.encounter_idx >= ENCOUNTERS_PER_MISSION as u8 {
         inv.current_battle = None;
         return;
     }
-    let roster = enemy_roster_for_area(inv.current_area);
+    let roster = enemy_roster_for_area(area_id);
     if roster.is_empty() {
         inv.current_battle = None;
         return;

@@ -1,12 +1,5 @@
-//! WebSocket connect handshake + reconnect-on-drop.
-//!
-//! The full handshake is: open WS → wait for `onopen` → call
-//! `GetPubkey` + `LoadInventory` on the delegate to pull the
-//! player's state → `Subscribe` + `Get` the presence contract.
-//! Any failure along this chain bubbles up to `schedule_reconnect`,
-//! which queues a backoff retry. Post-open WS drop also flows here
-//! via the WsShim's error handler, so a network blip rebuilds
-//! the full session.
+//! WebSocket connect handshake + reconnect-on-drop. Failures along
+//! the chain bubble up to `schedule_reconnect` for backoff retry.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -175,16 +168,10 @@ async fn connect_inner(
     }
     bump.set(now_ms());
 
-    // Probe the delegate with `GetPubkey`. If it succeeds, the
-    // delegate is already on this node — no register-time cost.
-    // If it fails (most likely cause on a fresh self-hosted node:
-    // delegate not registered, since delegates are NOT DHT-
-    // replicated), stage the bundled WASM via
-    // `ensure_delegate_registered` and retry once. The second
-    // failure is bubbled up unchanged. This swaps the eager-
-    // register pattern for probe-then-register, eliminating
-    // 234 KB of fetch + a WS round-trip on every clean
-    // reconnect to an already-provisioned node.
+    // Probe-then-register: if `GetPubkey` succeeds the delegate is
+    // already on this node. Otherwise stage the bundled WASM and
+    // retry once — delegates aren't DHT-replicated so a fresh
+    // self-hosted node needs the manual provision.
     let seed = identity::random_seed_candidate();
     let first_probe = delegate_client::call(
         ws.clone(),
@@ -226,12 +213,8 @@ async fn connect_inner(
             }
             bump.set(now_ms());
 
-            // Retry GetPubkey once. The register above is fire-and-
-            // forget at the WS layer but FIFO ordering at the node
-            // means this retry lands after the register has been
-            // processed. If even the retry fails, surface the retry
-            // error (preserving the original probe-failure cause in
-            // the log above).
+            // Retry once. WS FIFO ordering ensures this lands after
+            // the register has been processed by the node.
             match delegate_client::call(
                 ws.clone(),
                 pending.clone(),
@@ -280,46 +263,39 @@ async fn connect_inner(
     }
     bump.set(now_ms());
 
-    // Pull persistent UI prefs (display name + theme) from the
-    // delegate's secret store. Fire-and-forget — the player can
-    // already interact with the app on the defaults while this
-    // settles; the merge into Core is via the spawned task itself.
-    // localStorage is unreliable inside the sandboxed iframe (null
-    // origin → no reload-persistence), so the delegate is the only
-    // place these survive a refresh.
-    crate::freenet::actions::ui_prefs::load_ui_prefs_once(
+    // Settings from the delegate (display name / theme / locale) —
+    // sandboxed iframe has null origin so localStorage doesn't
+    // survive reload; delegate is the only durable store.
+    crate::freenet::actions::settings::load_settings_once(
         core.clone(),
         pending.clone(),
         bump.clone(),
     );
 
-    // Presence contract — only subscribe when configured. Same
-    // optional shape as mailbox/guilds. In single-player mode the
-    // app skips this block entirely: no World Boss, no leaderboard.
+    // Presence contract is optional (single-player when None).
     if let Some(p_key) = contract_key.as_ref() {
         let instance = *p_key.id();
-        let sub =
-            ClientRequest::ContractOp(ContractRequest::Subscribe { key: instance, summary: None });
-        ws.borrow_mut()
-            .send(sub)
-            .await
-            .map_err(|e| format!("subscribe: {e:?}"))?;
-
+        // Re-prime the local contract store with the bundled WASM
+        // so Subscribe/Update don't fail with "missing contract"
+        // on nodes that lost the code (e.g. after manual wipe).
+        if let Err(e) =
+            delegate_client::ensure_presence_contract_published(ws.clone(), CONTRACT_ID_B58).await
+        {
+            web_sys::console::warn_1(&format!("presence auto-publish: {e:?}").into());
+        }
         let get = ClientRequest::ContractOp(ContractRequest::Get {
             key: instance,
-            return_contract_code: false,
-            subscribe: false,
+            return_contract_code: true,
+            subscribe: true,
             blocking_subscribe: false,
         });
         if let Err(e) = ws.borrow_mut().send(get).await {
-            web_sys::console::warn_1(&format!("initial Get: {e:?}").into());
+            web_sys::console::warn_1(&format!("initial Get+Subscribe: {e:?}").into());
         }
     }
 
-    // Mailbox is optional — only subscribe if a key was successfully
-    // parsed from constants or dev-keys.json. Failures here are
-    // logged but don't kill the connection — presence-only operation
-    // is a valid fallback when the mailbox contract isn't deployed.
+    // Mailbox + guilds are optional contracts; failures log but
+    // don't kill the connection — presence-only is a valid fallback.
     if let Some(mb_key) = mailbox_key.as_ref() {
         let mb_instance = *mb_key.id();
         let mb_sub = ClientRequest::ContractOp(ContractRequest::Subscribe {

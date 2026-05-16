@@ -13,7 +13,7 @@ pub fn work_farm(ctx: &mut DelegateCtx, now_ms: u64) -> Result<Inventory, String
     enter_action(&mut inv, now_ms)?;
     inv.wheat = inv.wheat.saturating_add(1);
     check_achievements(&mut inv, now_ms);
-    save_inventory(ctx, &inv)?;
+    save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }
 
@@ -40,6 +40,6 @@ pub fn sell_wheat(
     inv.wheat_sold_total = inv.wheat_sold_total.saturating_add(to_sell);
     check_achievements(&mut inv, now_ms);
     check_endings(&mut inv, now_ms, None);
-    save_inventory(ctx, &inv)?;
+    save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }

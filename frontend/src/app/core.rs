@@ -58,7 +58,7 @@ pub struct Core {
     pub contract_key: Option<ContractKey>,
     pub delegate_key: DelegateKey,
     pub status: String,
-    /// Flipped to `true` once `freenet::actions::ui_prefs::load_ui_prefs_once`
+    /// Flipped to `true` once `freenet::actions::settings::load_settings_once`
     /// has merged the delegate's persisted display name / theme /
     /// tutorial flag into Core. Heartbeats are gated on this so the
     /// first presence publish ships the player's actual name instead
@@ -161,4 +161,4 @@ pub const ONBOARDING_STEPS: u8 = 4;
 // key `freenet-idle-onboarded`) retired — the sandboxed iframe's
 // null origin makes localStorage reload-ephemeral. The dismissed
 // flag now lives in `UiPrefs.tutorial_dismissed` on the delegate
-// and is loaded via `freenet::actions::ui_prefs::load_ui_prefs_once`.
+// and is loaded via `freenet::actions::settings::load_settings_once`.

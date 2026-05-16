@@ -15,6 +15,15 @@ pub struct AreaDef {
     pub enemy_hp: u64,
     pub enemy_atk: u64,
     pub enemy_def: u64,
+    /// Clears required in the **predecessor** area before this one
+    /// unlocks. `area_id - 1` is the predecessor today (the area
+    /// chain is linear). When the map turns into a graph (backlog
+    /// item C3), this generalises to "in any one of the
+    /// predecessor nodes along the chosen edge."
+    ///
+    /// `0` for `Village Fields` (the starter — no predecessor).
+    /// Tuned to feel like "a casual session in the previous zone."
+    pub clears_required: u64,
 }
 
 pub const AREAS: &[AreaDef] = &[
@@ -32,6 +41,7 @@ pub const AREAS: &[AreaDef] = &[
         enemy_hp: 10,
         enemy_atk: 3,
         enemy_def: 1,
+        clears_required: 0,
     },
     AreaDef {
         id: 1,
@@ -44,6 +54,7 @@ pub const AREAS: &[AreaDef] = &[
         enemy_hp: 35,
         enemy_atk: 8,
         enemy_def: 3,
+        clears_required: 10,
     },
     AreaDef {
         id: 2,
@@ -56,6 +67,7 @@ pub const AREAS: &[AreaDef] = &[
         enemy_hp: 80,
         enemy_atk: 18,
         enemy_def: 8,
+        clears_required: 20,
     },
     AreaDef {
         id: 3,
@@ -68,11 +80,24 @@ pub const AREAS: &[AreaDef] = &[
         enemy_hp: 160,
         enemy_atk: 40,
         enemy_def: 18,
+        clears_required: 30,
     },
 ];
 
 pub fn area_of(id: u8) -> &'static AreaDef {
     AREAS.iter().find(|a| a.id == id).unwrap_or(&AREAS[0])
+}
+
+/// The predecessor area whose clear-count gates this area, if any.
+/// Returns `None` for the starter (`Village Fields`). Today the chain
+/// is strictly linear (`id - 1`); when the map becomes a graph
+/// (backlog C3), this becomes a per-edge lookup.
+pub fn area_predecessor(area_id: u8) -> Option<u8> {
+    if area_id == 0 {
+        None
+    } else {
+        Some(area_id.saturating_sub(1))
+    }
 }
 
 pub fn era_max_hp(era: u64) -> u64 {

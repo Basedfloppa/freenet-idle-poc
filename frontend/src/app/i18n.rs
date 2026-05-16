@@ -52,6 +52,10 @@ impl Locale {
     /// untranslated string leaking into the UI.
     pub fn tr(self, msg: MessageId) -> &'static str {
         match (self, msg) {
+            // ── Boot-time loader (shown until prefs_loaded flips) ──
+            (Self::En, MessageId::BootLoading) => "Loading…",
+            (Self::Ru, MessageId::BootLoading) => "Загрузка…",
+
             // ── Connection status (set as `c.status` from reconnect.rs) ──
             (Self::En, MessageId::StatusAskingDelegate) => "asking delegate for identity…",
             (Self::Ru, MessageId::StatusAskingDelegate) => "запрос личности у делегата…",
@@ -671,6 +675,27 @@ impl Locale {
         }
     }
 
+    /// World-map area card footer for the clears-locked state —
+    /// "clears N / M in prev". The level gate is OK but the
+    /// predecessor zone hasn't been cleared enough times yet.
+    /// Shows progress so the player knows how close they are.
+    pub fn fmt_clears_required(self, have: u64, need: u64) -> String {
+        match self {
+            Self::En => format!("clears {have} / {need} in prev"),
+            Self::Ru => format!("нужно {have} / {need} зачисток в предыд."),
+        }
+    }
+
+    /// Compact "cleared N times" indicator on each area card —
+    /// shown alongside the gold / essence / damage badges so the
+    /// player sees their mastery progress per zone.
+    pub fn fmt_cleared_count(self, n: u64) -> String {
+        match self {
+            Self::En => format!("cleared {n}"),
+            Self::Ru => format!("зачищено {n}"),
+        }
+    }
+
     /// Encounter progress line during a battle.
     pub fn fmt_encounter_progress(self, idx: u32, total: u32) -> String {
         match self {
@@ -925,6 +950,10 @@ impl HelpBody {
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Copy)]
 pub enum MessageId {
+    // Boot-time loader shown while the delegate's `LoadUiPrefs` reply is
+    // in flight; once that lands the main UI takes over.
+    BootLoading,
+
     // Connection status.
     StatusAskingDelegate,
     StatusRegisteringDelegate,

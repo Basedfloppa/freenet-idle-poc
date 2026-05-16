@@ -134,6 +134,14 @@ impl DelegateInterface for IdentityDelegate {
                 Ok(()) => AppResponse::UiPrefs(prefs),
                 Err(e) => AppResponse::Error(e),
             },
+            AppRequest::LoadBlob { kind } => AppResponse::Blob {
+                kind,
+                payload: state::load_blob(ctx, kind),
+            },
+            AppRequest::SaveBlob { kind, payload } => match state::save_blob(ctx, kind, &payload) {
+                Ok(()) => AppResponse::BlobSaved { kind },
+                Err(e) => AppResponse::Error(e),
+            },
         };
 
         let out_envelope = DelegateEnvelopeOut {

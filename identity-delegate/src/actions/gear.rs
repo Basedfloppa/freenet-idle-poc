@@ -41,7 +41,7 @@ pub fn equip_gear(
     inv.equipped[slot_idx] = Some(catalog_id);
     inv.current_hp = inv.current_hp.min(max_hp_of(&inv));
     check_achievements(&mut inv, now_ms);
-    save_inventory(ctx, &inv)?;
+    save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }
 
@@ -60,7 +60,7 @@ pub fn unequip_slot(
         inv.unequipped.push(prev);
     }
     inv.current_hp = inv.current_hp.min(max_hp_of(&inv));
-    save_inventory(ctx, &inv)?;
+    save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }
 
@@ -81,7 +81,7 @@ pub fn sell_gear(
     inv.unequipped.swap_remove(pos);
     inv.gold = inv.gold.saturating_add(gear_sell_price(tmpl.tier));
     check_achievements(&mut inv, now_ms);
-    save_inventory(ctx, &inv)?;
+    save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }
 
@@ -127,7 +127,7 @@ pub fn forge_upgrade(
         inv.unequipped.push(next_id);
     }
     check_achievements(&mut inv, now_ms);
-    save_inventory(ctx, &inv)?;
+    save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }
 
@@ -155,7 +155,7 @@ pub fn buy_gear_roll(
     inv.unequipped.push(cid);
     inv.shop_purchase_count = inv.shop_purchase_count.saturating_add(1);
     check_achievements(&mut inv, now_ms);
-    save_inventory(ctx, &inv)?;
+    save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }
 
@@ -208,6 +208,6 @@ pub fn auto_equip_best(ctx: &mut DelegateCtx, now_ms: u64) -> Result<Inventory, 
     }
     inv.current_hp = inv.current_hp.min(max_hp_of(&inv));
     check_achievements(&mut inv, now_ms);
-    save_inventory(ctx, &inv)?;
+    save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }

@@ -22,13 +22,13 @@ pub const DEFAULT_NAME: &str = "player";
 /// reload. The blob is kept for non-critical UI knobs (cadence,
 /// HP-pause threshold, etc.) that can tolerate resetting on reload;
 /// load-bearing settings (display name, theme) are persisted on the
-/// delegate via `crate::freenet::actions::ui_prefs`.
+/// delegate via `crate::freenet::actions::settings`.
 const PREFS_STORAGE_KEY: &str = "freenet-idle-prefs";
 
 /// Push the requested theme id to `<html data-theme=...>`.
 ///
 /// The persistent copy lives on the delegate (see
-/// `freenet::actions::ui_prefs::save_ui_prefs_once`) — the sandboxed
+/// `freenet::actions::settings::save_settings_once`) — the sandboxed
 /// iframe's null origin breaks localStorage across reloads, so we
 /// cannot rely on it. The pre-WASM inline script in `index.html`
 /// still attempts a localStorage read for first-paint speed; in the

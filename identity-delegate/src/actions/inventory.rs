@@ -18,7 +18,7 @@ pub fn touch_inventory(ctx: &mut DelegateCtx, now_ms: u64) -> Result<Inventory, 
     enter_action(&mut inv, now_ms)?;
     catch_up_auto(&mut inv, now_ms);
     check_achievements(&mut inv, now_ms);
-    save_inventory(ctx, &inv)?;
+    save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }
 
@@ -27,7 +27,7 @@ pub fn touch_inventory(ctx: &mut DelegateCtx, now_ms: u64) -> Result<Inventory, 
 /// level 1 with empty pockets. Useful for re-running the new-player
 /// experience without spinning up a fresh node.
 pub fn reset_inventory(ctx: &mut DelegateCtx, _now_ms: u64) -> Result<Inventory, String> {
-    let fresh = Inventory::default();
-    save_inventory(ctx, &fresh)?;
+    let mut fresh = Inventory::default();
+    save_inventory(ctx, &mut fresh)?;
     Ok(fresh)
 }

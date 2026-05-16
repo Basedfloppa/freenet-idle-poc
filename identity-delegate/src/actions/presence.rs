@@ -44,7 +44,7 @@ pub fn publish_presence(
     let mut inv = load_inventory_raw(ctx);
     enter_action(&mut inv, now_ms)?;
     check_achievements(&mut inv, now_ms);
-    save_inventory(ctx, &inv)?;
+    save_inventory(ctx, &mut inv)?;
     let sk = load_seed(ctx)?.ok_or_else(|| "no seed installed yet".to_string())?;
     let pubkey = sk.verifying_key().to_bytes();
     let name = truncate_bytes_at(name, MAX_NAME_BYTES);

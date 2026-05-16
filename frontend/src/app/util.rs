@@ -33,6 +33,15 @@ pub const REACTIVE_PUBLISH_MIN_MS: u64 = 3_000;
 /// retry count, capped at the last value.
 pub const WS_RECONNECT_BACKOFF_MS: &[u32] = &[500, 1_000, 2_000, 5_000, 10_000];
 
+/// Hard ceiling on how long the boot-time loader waits for the
+/// delegate's `LoadUiPrefs` reply before falling back to defaults.
+/// Above this, the UI renders with whatever Core has (DEFAULT_NAME,
+/// DEFAULT_THEME, onboarding step 0) so a misconfigured or
+/// unreachable delegate never wedges the app in the loader screen.
+/// Sized to be well above the typical local-loopback round-trip
+/// (~50-200 ms) but well under "user gives up and reloads" (~5 s).
+pub const PREFS_LOAD_TIMEOUT_MS: u32 = 3_000;
+
 pub fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()

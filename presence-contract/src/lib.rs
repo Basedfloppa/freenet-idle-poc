@@ -13,15 +13,9 @@
 use freenet_stdlib::prelude::*;
 use shared::{
     ContractDelta, ContractState, ContractSummary, CONTRACT_STATE_VERSION, MAX_AREA_BYTES,
-    MAX_CUMULATIVE_KEYS, MAX_LIVE_ENTRIES, MAX_NAME_BYTES, MAX_PAYLOAD_BYTES, MAX_TIMESTAMP_MS,
-    PRESENCE_PAYLOAD_VERSION,
+    MAX_CUMULATIVE_KEYS, MAX_LIVE_ENTRIES, MAX_NAME_BYTES, MAX_PAYLOAD_BYTES, MAX_STALE_MS,
+    MAX_TIMESTAMP_MS, PRESENCE_PAYLOAD_VERSION,
 };
-
-/// Drop entries whose timestamp is this far behind the freshest. With
-/// the frontend heartbeat at 10 s, 60 s gives 6 missed beats before a
-/// player vanishes from the list — comfortable buffer for brief
-/// network hiccups.
-const MAX_STALE_MS: u64 = 60 * 1000;
 
 struct Presence;
 
