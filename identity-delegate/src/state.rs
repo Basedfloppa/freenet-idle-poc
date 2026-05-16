@@ -188,8 +188,20 @@ pub fn enter_action(inv: &mut Inventory, now_ms: u64) -> Result<(), String> {
 
 /// Top up `current_hp` toward `max_hp_of(inv)` proportional to the
 /// elapsed time since the last regen tick. Full regen takes
-/// `HP_FULL_REGEN_MS` from 0 to max.
+/// `HP_FULL_REGEN_MS` from 0 to max. **Skipped during an active
+/// battle** — passive recovery while the player is being hit would
+/// trivialise sustained fights; the battle resolver applies damage
+/// every turn and the player can still queue a Potion mid-fight if
+/// they need an emergency heal.
 pub fn apply_hp_regen(inv: &mut Inventory, now_ms: u64) {
+    if inv.current_battle.is_some() {
+        // Keep the regen anchor advancing so the moment the battle
+        // resolves the clock starts from "now", not "the last
+        // pre-fight tick" — without this, finishing a fight would
+        // dump a chunk of catch-up regen into the bar.
+        inv.last_hp_tick_ms = now_ms;
+        return;
+    }
     let cap = max_hp_of(inv);
     if inv.current_hp >= cap {
         inv.last_hp_tick_ms = now_ms;

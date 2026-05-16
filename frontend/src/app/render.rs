@@ -94,6 +94,7 @@ pub fn render_core(
                 None,
                 None,
                 None,
+                None,
             );
             bump.set(now_ms());
         })
@@ -577,6 +578,7 @@ pub fn render_core(
                     None,
                     None,
                     None,
+                    None,
                 );
                 bump.set(now_ms());
             })
@@ -611,6 +613,7 @@ pub fn render_core(
                     None,
                     None,
                     Some(code.to_string()),
+                    None,
                     None,
                 );
                 bump.set(now_ms());
@@ -806,6 +809,7 @@ pub fn render_core(
                     Some(true),
                     None,
                     None,
+                    None,
                 );
             }
             bump.set(now_ms());
@@ -828,6 +832,7 @@ pub fn render_core(
                 Some(true),
                 None,
                 None,
+                None,
             );
             bump.set(now_ms());
         })
@@ -839,14 +844,19 @@ pub fn render_core(
         let bump = bump.clone();
         Callback::from(move |_: MouseEvent| {
             let version = env!("BUILD_VERSION").to_string();
+            // Capture the catchup's started_ms before we wipe it
+            // locally — this is the watermark we persist so the
+            // same window doesn't re-pop on next reload.
+            let acked_ts = {
+                let g = core.borrow();
+                let Some(c) = g.as_ref() else { return };
+                c.inventory.last_catchup.as_ref().map(|s| s.started_ms).unwrap_or(0)
+            };
             if let Some(c) = core.borrow_mut().as_mut() {
                 c.catchup_modal_dismissed = true;
                 c.last_seen_version = Some(version.clone());
-                // The offline-catchup summary is single-shot — clear
-                // it locally so re-renders within this session don't
-                // re-pop the modal even before the next mission
-                // wipes it on the delegate side.
-                c.inventory.last_catchup = None;
+                c.last_catchup_acked_started_ms =
+                    c.last_catchup_acked_started_ms.max(acked_ts);
             }
             crate::freenet::actions::settings::save_settings_once(
                 core.clone(),
@@ -857,6 +867,7 @@ pub fn render_core(
                 None,
                 None,
                 Some(version),
+                Some(acked_ts),
             );
             bump.set(now_ms());
         })

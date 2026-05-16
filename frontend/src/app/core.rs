@@ -146,6 +146,15 @@ pub struct Core {
     /// surfaces once per offline-return rather than blocking the
     /// UI permanently after the first save.
     pub catchup_modal_dismissed: bool,
+    /// `started_ms` watermark of the most-recently-acknowledged
+    /// catchup summary. Loaded from the delegate's Settings blob
+    /// on connect, written back via `save_settings_once` when the
+    /// player dismisses the modal. Persistent across reloads so
+    /// the same catchup window doesn't pop the modal twice — the
+    /// pre-modal banner used to be cleared by `run_mission` on
+    /// the delegate, but that path raced the unified auto-tick
+    /// and the modal vanished before the player could click.
+    pub last_catchup_acked_started_ms: u64,
 }
 
 /// Apply a fresh `Inventory` from the delegate into `Core`,

@@ -80,8 +80,12 @@ pub fn run_mission(
         let _ = start_battle(&mut inv, now_ms)?;
     }
     tick_battle(&mut inv, now_ms);
-    // Player engaged — clear the "while you were away" banner.
-    inv.last_catchup = None;
+    // `last_catchup` is no longer cleared here — the modal needs
+    // an explicit user ack to dismiss (frontend stamps the
+    // started_ms watermark into the Settings blob on "Got it"),
+    // and auto-mission fires almost immediately on return so the
+    // old clear-on-run path was eating the modal before the
+    // player saw it.
     save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }

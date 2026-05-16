@@ -10,8 +10,10 @@ An idle/RPG on top of Freenet, where:
 
 ```
 idle-poc/
-├── shared/                   wire types + game model (InventoryV10),
-│                             format_si helper, versioned InventoryWire
+├── shared/                   wire types + game model (InventoryV13 = V12 + Legacy
+│                             stars, V12 = V11 + Estate + idle_action, V11 = V10
+│                             + area_clears + reveal bitmask), format_si helper,
+│                             versioned InventoryWire migration chain
 ├── presence-contract/        Rust contract: LWW merge + cumulative World Boss
 │                             ledger + outlier-resistant prune; caps 1k entries
 ├── mailbox-contract/         Player-to-player signed log (gift / invite /
@@ -157,7 +159,7 @@ deployment uses a different invalidation path.
 | UI prefs (theme, sync cadence, hide_pubkey) | Browser `localStorage` | Display settings + onboarding flag | Settings → Reset to defaults, or DevTools → Clear storage |
 | Active battle (HP, queue) | `Inventory.current_battle` on the node | Server-side state-machine combat | `Reset progress` or node wipe |
 | Identity (Ed25519 seed) | Delegate secret at `/tmp/freenet-local/secrets/local/<delegate-key>/` (key `identity-seed-v1`) | Player's signing key | Wipe the data-dir; identity migrates via **Settings → Export seed** |
-| Inventory (gold, gear, skills, achievements, …) | Same delegate secret store (key `inventory-v9`, format `InventoryWire::V10(...)`) | Full game progress | `Reset progress` (via delegate RPC) or wipe the data-dir |
+| Inventory (gold, gear, skills, achievements, Estate workers, Legacy stars, …) | Same delegate secret store (key `inventory-v9`, format `InventoryWire::V13(...)` after the V9→V13 migration chain) | Full game progress | `Reset progress` (full wipe) or `Ascend` (soft-reset run; keeps stars/level/missions/skills) |
 | Presence (`anon-XXXX` + gold + boss_damage + ts) | `presence-contract`, one entry per pubkey | Leaderboard + World Boss aggregate | Auto-prune after 60s of silence (live), watermark persists in `cumulative_damage` |
 | Cumulative World Boss watermark | `presence-contract.cumulative_damage` | Per-key high watermark | Cap-eviction at 10k unique keys |
 | Mailbox messages | `mailbox-contract`, signed log | gift/invite/trade/chat (substrate) | 7-day TTL or 5k-entry cap |
@@ -168,22 +170,27 @@ deployment uses a different invalidation path.
 ### ✅ Done
 
 **Gameplay**
-- Tick-based combat (`TURN_COOLDOWN_MS = 1s`, initiative by `speed`, evasion as flat damage scaling)
+- Tick-based combat (`TURN_COOLDOWN_MS = 1s`, initiative by `speed`, evasion as flat damage scaling). Passive HP regen is gated off during an active battle so sustained fights can't be regen-trivialised.
 - Mid-fight queueable actions: `Use Potion` (full heal) / `Use Fireball` (bonus damage)
-- 5 encounters per mission, the chain advances automatically
-- 4 areas (Village Fields → Forest Road → Mountain Pass → Boss's Lair) with level gates
-- 5 forms (Human / Slime / Cat / Dragon / Horse) with transformation on loss → permanent skill (prestige loop)
-- 8 slots × 4 tiers of gear (32 catalog ids), per-form slot mask
+- 3 encounters per mission (post-B6 rebalance), chain advances automatically
+- 6 areas in a **graph** (C3a): Village → Forest Road → {Mountain Pass, Deep Forest} → {Snowfields → Boss's Lair, Mountain Pass → Boss's Lair}. Each area gates on `min_level` AND `clears_required` in any one predecessor (OR semantics).
+- 5 forms (Human / Slime / Cat / Dragon / Horse) with transformation on loss → permanent skill (prestige loop). Forms also drive **Estate affinity** — current form buffs/penalises specific worker tiers.
+- Shop now sells **forms directly**: cheap Human reset (1.5k g), expensive direct-form purchases (20k–60k g) as alternative to defeat-induced transformation.
+- 8 slots × 4 tiers of gear (32 catalog ids), per-form slot mask, tier-coloured borders on equipped slots
 - Forge (3-of-a-kind + essence → next tier, up to Legendary)
-- 11 achievements, 6 skills (4 form-derived + Veteran/Champion level milestones)
+- 11 achievements, 6 skills (4 form-derived + Veteran/Champion level milestones); hover any visited-form badge for its stat bundle
 - 4 endings (Victory / Dragon Lord / Pilgrim / Quiet Farmer)
-- Exponential XP leveling (1.5× per level), level-static base stats
-- HP regen (`HP_FULL_REGEN_MS`)
+- Exponential XP leveling (1.5× per level), level-static base stats (post-B6: base atk/def = 2 + lvl×2; HP unchanged)
+- HP regen (`HP_FULL_REGEN_MS`) — skipped while a battle is active
 - Procedural plot (6×6×6×6×6 = 7776 combinations)
 - Wheat farm (10:1 → gold) as safe-mode income
-- Shop: pre-rolled gear by slot+tier, potions, fireballs, Auto-Equip Best
+- Shop: pre-rolled gear by slot+tier, potions, fireballs, **Auto-Equip Best** that pre-flights form-mask + per-slot score so the button greys out when nothing in stash beats current gear
 - Combat history (ring buffer, `COMBAT_HISTORY_CAP = 30`)
 - Sage skill shop (4 form-skills purchasable for essence)
+- **Estate** (B2): 4-tier worker economy (Farmhand/Forager/Trader/Sage) with `1.07ⁿ` cost curve. Workers accrue resources passively while Estate is the selected idle action (§5.6 single-active-action rule). Form-affinity multiplier per tier compounds with Legacy multiplier multiplicatively. Estate blocks battles — `RunMission` and auto-mission toggle are disabled while Estate is the active idle.
+- **Legacy / Epoch** (C1, delegate-only MVP): 1 star per 5 earned levels (watermark prevents re-grinding across ascensions). Spend on permanent multipliers (Hero Attack +5%/lvl, Estate Yield +10%/lvl, Mission Gold +5%/lvl). Cost curve `1,2,4,8,…`. **Ascend** soft-resets gold/gear/Estate while keeping stars/level/missions/skills/achievements.
+- **Phased reveal** (A2/A5): UI sections latch on by predicate (Shop @ 1 mission, World Boss @ 10, Auto-mission @ 25, Estate @ 50g, Skills @ 100 essence, etc). Once-per-session slide-in animation keyed off `Core::animate_reveal`.
+- **Welcome-back modal** (B4): merges offline-catchup summary, Estate accrual breakdown, and per-version patchnotes into a single dismissible modal. Catchup ack persisted via `last_catchup_acked_started_ms` in the Settings blob so the same window doesn't re-pop across reloads.
 
 **Multiplayer / Freenet**
 - `presence-contract` — World Boss aggregator with a **persistent `cumulative_damage` ledger** (survives entry pruning)
@@ -193,11 +200,14 @@ deployment uses a different invalidation path.
 - Lobby leaderboard, World Boss era progression (`era_max_hp = 500 × (era+1)²`)
 
 **Persistence + Identity**
-- `InventoryWire` non-destructive migration framework (V9 → V10 done); future bumps don't lose saves
+- `InventoryWire` non-destructive migration framework — chain V9 → V10 → V11 (area_clears + reveal) → V12 (Estate + idle_action) → V13 (Legacy). Old saves auto-promote on next `save_inventory`. Every bump uses additive composition (`pub struct InventoryVN { pub base: InventoryV(N-1), … }` with `Deref`/`DerefMut`) so the wire format stays byte-identical to a flat layout.
 - Authoritative delegate (`PublishPresence`, `SendMessage`, `SignGuildOp` — the webapp can't inject numbers)
-- Persistent `auto_run_enabled` + offline catch-up (up to 1 hour of simulation on return)
+- Persistent `auto_run_enabled` + offline catch-up (up to 1 hour of simulation on return). Estate idle accrual feeds the same modal via a parallel 1-hour-cap path (`tick_estate` writes `last_catchup` once elapsed ≥ 60 s).
+- Single-active-action rule (§5.6): `IDLE_ACTION_NONE` / `AUTO_MISSION` / `ESTATE`. Toggling one path clears the other so accrual clocks never run in parallel.
 - `Settings → Export seed` (Ed25519 hex export, identity migration between nodes)
 - `Settings → Reset progress` (wipe Inventory, identity persists)
+- `Settings → Legacy` (when revealed): per-node star spend tree + Ascend confirm
+- Settings JSON blob (`BlobKind::Settings`) holds display name, theme, locale, tutorial-dismissed, `last_seen_version`, `last_catchup_acked_started_ms`. Frontend owns the schema; delegate stores opaque bytes — adding a field is a frontend-only change.
 
 **Anti-cheat / robustness in the contracts**
 - Version byte in `PresencePayload`, `ContractState`, `MailboxState`, `GuildsState` — forward-compat hook
@@ -216,6 +226,13 @@ deployment uses a different invalidation path.
 - `format_si` engineering notation (`1.2k`, `200k`, `1B`) for unbounded counters
 - Debug overlay (18 lines of state diagnostics) in Settings → Advanced
 - Top-level Guilds tab (`⚔`) with create/join/leave flow
+- **Localisation**: EN + RU (full coverage) and DE (curated subset with English fallback via `Locale::fmt_locale`). `navigator.language` auto-pick on first load; explicit picker in Settings stores `locale` short-code in the Settings blob.
+- **Build-stamped semver**: `frontend/build.rs` runs `git rev-list --count HEAD` and emits `BUILD_VERSION=major.minor.<commit_count>` as a `cargo:rustc-env`. Every push advances the version; catchup modal compares the stamp against `last_seen_version` to fire the "What's new" section even without a curated changelog entry.
+- **Reveal animation**: section slide-in plays exactly once per session — `Core::animate_reveal` carries the newly-flipped bits; render stamps `.reveal-anim` class for that single tick; subsequent tab switches see `animate_reveal == 0` and skip the animation.
+- **Equipment quality colour-coding**: equipped slots get a 4-px tier-coloured left border + tier-3/4 value-text colour; tier-4 (Legendary) also gets an inset box-shadow glow.
+- **Empty-inventory hiding**: 0-count Potion / Fireball rows are pruned from the Consumables panel and the Shop's Resources table. Gold / Essence stay (progress counters, not stash-style).
+- **Stable battle log**: `ul.battle-turns` is `min-height: max-height: 4.5em` with internal `overflow-y`, so the page doesn't reflow as turns 0 → 5 accumulate. Queued-action slot also reserves space.
+- **World Map as graph**: top-to-bottom rows by predecessor depth, CSS pseudo-element connectors above each non-starter, localised "↑ Predecessor" label. Grows downward as new branch areas ship.
 
 **Infrastructure**
 - 28 unit tests across the contract crates (presence 15 + mailbox 5 + guilds 7 + shared fmt 1)
@@ -244,8 +261,7 @@ deployment uses a different invalidation path.
 
 **UX polish**
 - **Mobile-responsive layout** — `grid-3` collapses, but shop/buy-grid/leaderboard break on narrow viewports.
-- **i18n** — UI / Help / plot are pure English.
-- **Achievement toast** on unlock — the player currently learns through the Achievements tab only. *(Already implemented — see toast queue + `ingest_inventory` diff.)*
+- **Full DE / FR / ES / JA translation matrices** — German has curated coverage of tab labels + status pills + boot strings via `tr_de`; the rest fall back to English through `Locale::fmt_locale`.
 - **Reactive notifications** for World Boss era advance, ending unlock.
 - **Spectator mode** — view the leaderboard without participating (maybe via `?spectate=1`).
 - **Replay shareable link** — export last_combat / boss_damage progress as a URL for sharing.
@@ -263,7 +279,7 @@ deployment uses a different invalidation path.
 - **Only the locally-built fdev/freenet are API-consistent.** PATH-fdev 0.3.151 + node 0.1.177 fails with `"input bytes aren't valid utf-8"` while compiling WASM. We use `freenet-core/target/debug/{freenet,fdev}` 0.2.55 / 0.3.218.
 - **fdev needs `CARGO_TARGET_DIR`** — otherwise it searches for the workspace root via its compile-time `CARGO_MANIFEST_DIR` and panics.
 - **The contract pins wire-version 0.6.1** on the frontend side (to talk to node 0.2.55) and uses a path-dep 0.7.0 on the contract/delegate side — the same trick as in `freenet-webrtc-poc`.
-- **`InventoryWire` is non-destructive schema evolution.** The Inventory is serialized as `InventoryWire::V10(...)`. Adding fields = a new `V11(InventoryV11)` variant + a `From<V10>` migration in `into_latest`. **`INVENTORY_SECRET_ID` no longer needs to be bumped** — old saves are read and auto-promoted on first save.
+- **`InventoryWire` is non-destructive schema evolution.** Current chain: V9 → V10 (add `current_battle`) → V11 (add `area_clears` + `revealed` bitmask) → V12 (add `Estate` + `idle_action`) → V13 (add `LegacyState`). The on-disk blob is serialised as `InventoryWire::V13(...)` today; older variants decode and auto-promote on first `save_inventory`. **Pattern for purely-additive bumps**: `pub struct InventoryV(N+1) { pub base: InventoryV(N), <new_fields> }` with `Deref`/`DerefMut` to the base. Bincode serialises structs as concatenated fields, so the wire format is byte-identical to a flat layout — old V11/V12 blobs keep decoding even though the type tree got deeper. For remove/rename, re-declare flat.
 - **Combat is a tick-based state machine in the delegate.** `Inventory.current_battle` persists. The frontend polls `TickBattle` every `POLL_TICK_MS = 1s` during a fight; outside combat — the regular pull cadence (5/10/30s per prefs). `TURN_COOLDOWN_MS = 1s` — one turn iteration = queued action + player swing + enemy swing with initiative by `speed`. Offline catch-up uses the same `tick_battle` procedure — online/offline converge on identical numbers.
 - **Auto-mission is persistent.** `Inventory.auto_run_enabled` lives on the node; the toggle button sends `SetAutoRun`. Close the tab, come back an hour later — the delegate simulates the missed ticks (capped at 1 hour) and the "while you were away" banner sums it up.
 - **Mailbox and Guilds are independent contracts.** The frontend subscribes to each in parallel, routes responses by `key.id()`. If the corresponding key isn't configured in `dev-keys.json`, the feature disables gracefully without breaking presence.

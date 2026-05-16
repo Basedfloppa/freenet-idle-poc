@@ -192,11 +192,27 @@ pub fn render_catchup_modal(
     let inv = &c.inventory;
     let current_version = env!("BUILD_VERSION");
     let version_changed = c.last_seen_version.as_deref() != Some(current_version);
-    let has_catchup = inv.last_catchup.is_some();
+    // Only count a catchup as "fresh" when its started_ms is past
+    // the player's stored ack watermark. The delegate keeps the
+    // last_catchup field set indefinitely (no longer auto-cleared
+    // on `run_mission` because the auto-tick was eating the modal
+    // before the player saw it). Frontend acks via `save_settings`
+    // bumping `last_catchup_acked_started_ms`, which persists
+    // across reloads — same offline window doesn't re-pop after
+    // dismiss.
+    let has_catchup = inv
+        .last_catchup
+        .as_ref()
+        .map(|s| s.started_ms > c.last_catchup_acked_started_ms)
+        .unwrap_or(false);
     if !version_changed && !has_catchup {
         return html! {};
     }
-    let catchup_block: Html = match inv.last_catchup.as_ref() {
+    // Only render the per-section blocks when the catchup is
+    // fresh (post-ack-watermark). Avoids stale "while you were
+    // away 0s" panes from the same offline window after the
+    // player already clicked Got it.
+    let catchup_block: Html = match inv.last_catchup.as_ref().filter(|_| has_catchup) {
         Some(s) => {
             let elapsed_s = s.ended_ms.saturating_sub(s.started_ms) / 1000;
             let elapsed_human = if elapsed_s >= 3600 {
@@ -225,7 +241,8 @@ pub fn render_catchup_modal(
         }
         None => html! {},
     };
-    let estate_block: Html = if inv.idle_action == shared::IDLE_ACTION_ESTATE
+    let estate_block: Html = if has_catchup
+        && inv.idle_action == shared::IDLE_ACTION_ESTATE
         && !inv.estate.workers.is_empty()
     {
         let lines: Vec<Html> = shared::ESTATE_TIERS

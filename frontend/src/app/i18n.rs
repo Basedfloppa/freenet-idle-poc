@@ -492,6 +492,12 @@ impl Locale {
             (Self::Ru, MessageId::HelpDelegateWhat) => "что делает делегат?",
             (Self::En, MessageId::HelpGuildsMailbox) => "guilds & mailbox (early)",
             (Self::Ru, MessageId::HelpGuildsMailbox) => "гильдии и почта (ранняя стадия)",
+            (Self::En, MessageId::HelpEstate) => "estate — passive income loop",
+            (Self::Ru, MessageId::HelpEstate) => "поместье — петля пассивного дохода",
+            (Self::En, MessageId::HelpLegacy) => "legacy — personal prestige",
+            (Self::Ru, MessageId::HelpLegacy) => "наследие — личный престиж",
+            (Self::En, MessageId::HelpAreaGraph) => "world map — graph layout",
+            (Self::Ru, MessageId::HelpAreaGraph) => "карта мира — граф",
 
             // Estate panel (B2)
             (Self::En, MessageId::PanelEstate) => "Estate",
@@ -552,9 +558,9 @@ impl Locale {
             (Self::En, MessageId::PanelFormsShop) => "Forms",
             (Self::Ru, MessageId::PanelFormsShop) => "Формы",
             (Self::En, MessageId::FormsShopDesc) =>
-                "Reset your shape (Human is cheap) or commit gold to one of the other four forms. Direct purchase mirrors a defeat-induced transformation: the form is added to your visited set so its skill unlocks at the Sage.",
+                "Reset your shape (Human is cheap) or commit gold to one of the other four forms. Each form also drives Estate affinity — Horse buffs Farmhand + Forager, Dragon buffs Trader + Sage, Cat buffs Forager + Sage, Slime gives a flat +30% across the board, Human is neutral. Direct purchase mirrors a defeat-induced transformation: the form is added to your visited set so its skill unlocks at the Sage.",
             (Self::Ru, MessageId::FormsShopDesc) =>
-                "Сбрось облик (Человек стоит дёшево) или вложи золото в одну из четырёх остальных форм. Покупка работает как трансформация после поражения: форма добавляется в твой набор посещённых, и её навык открывается у Мудреца.",
+                "Сбрось облик (Человек стоит дёшево) или вложи золото в одну из четырёх остальных форм. Каждая форма ещё и определяет аффинити в Поместье — Конь усиливает Работника+Собирателя, Дракон — Торговца+Мудреца, Кот — Собирателя+Мудреца, Слизь даёт +30% по всем звеньям, Человек нейтрален. Покупка работает как трансформация после поражения: форма добавляется в твой набор посещённых, и её навык открывается у Мудреца.",
             (Self::En, MessageId::FormsShopBaselineDesc) => "balanced baseline — no stat bundle",
             (Self::Ru, MessageId::FormsShopBaselineDesc) => "сбалансированная база — без бонусов",
             (Self::En, MessageId::TipFormAlreadyActive) => "you are already in this form",
@@ -1103,6 +1109,7 @@ pub struct HelpBody {
     pub stats_p1: &'static str,
     pub stats_p2: &'static str,
     pub forms_p1: &'static str,
+    pub forms_p2: &'static str,
     pub tabs: &'static [&'static str],
     pub shop_p1: &'static str,
     pub shop_p2: &'static str,
@@ -1112,6 +1119,10 @@ pub struct HelpBody {
     pub delegate_p2: &'static str,
     pub guilds_p1: &'static str,
     pub guilds_p2: &'static str,
+    pub estate_p1: &'static str,
+    pub estate_p2: &'static str,
+    pub legacy_p1: &'static str,
+    pub area_graph_p1: &'static str,
 }
 
 impl HelpBody {
@@ -1121,6 +1132,7 @@ impl HelpBody {
         stats_p1: "Your Level comes from cumulative XP. XP per level rises 1.5× each step (100, 150, 225, 337, …). Base stats are static per level: HP = 20 + lvl×5, Attack = 5 + lvl×2, Defence = 5 + lvl×2. Equipment, form, and skills add on top; nothing else (no gold/essence bleed-through).",
         stats_p2: "HP depletes in combat and regenerates over time (full regen in 180s of real time). Use a Potion to instantly fill it.",
         forms_p1: "Losing a combat to a non-mundane enemy permanently transforms you into that monster. Each form has its own equipped-slot mask: a Slime can only wear Helm + Ring, a Cat keeps Helm/Cloak/Boots/Ring, etc. Stats shift to match the form. Every form you've touched leaves a permanent Skill — even after you change back to Human, those bonuses carry. This is the prestige loop.",
+        forms_p2: "Forms also drive Estate affinity: while you're in a given form, your workers in matching tiers produce more, while non-matching tiers produce less. Horse buffs Farmhand + Forager, Dragon buffs Trader + Sage, Cat buffs Forager + Sage, Slime gives a flat +30% across the board, Human is neutral. The Shop tab has a paid Forms section so you can pick a shape directly without waiting for a defeat — Human is the cheap reset, the other four are a strategic commitment.",
         tabs: &[
             "🛡 Farm — your hero, the live combat scene (HP bars, queue-action buttons), plot, World Boss, raw resources.",
             "🗺 World Map — switch farming areas. Higher areas have a level gate but pay more (or differently — Forest is essence-rich, Mountain is gold-rich, Boss's Lair is damage-heavy).",
@@ -1138,6 +1150,10 @@ impl HelpBody {
         delegate_p2: "To move identity to another node, use Settings → Export seed — it returns the 32-byte secret key; copy it once, paste on the new node. Reset progress wipes the inventory (gold, gear, skills, achievements) but keeps the pubkey — leaderboards still recognize you. To actually destroy the identity, wipe `~/.config/freenet/secrets/local/<delegate-key>/`.",
         guilds_p1: "The Guilds tab is the first cross-player interaction beyond the leaderboard: cooperative groups, one pubkey per guild, 50 members per guild. Create a new one or join existing — leader auto-handoff on leave. Gameplay layers (shared boss, member contributions) come later.",
         guilds_p2: "The Mailbox section in Settings → Advanced is the signed-log substrate for player-to-player messaging — gifts, invites, trade offers will plug in on top. Send a self-test message to verify the round-trip is working.",
+        estate_p1: "Estate is the long-game income loop on the Farm tab. Hire workers in four tiers — Farmhand (wheat), Forager (more wheat), Trader (gold), Sage (essence) — each with a 1.07ⁿ price curve. Workers accrue passively while Estate is your selected idle action, capped at ~1 hour of catchup. Running Estate pauses auto-mission and blocks Run Mission: you pick what to be doing right now, the strategic axis is which idle loop to commit to.",
+        estate_p2: "Form affinity stacks on top: the active Form buffs or penalises specific tiers (see Forms above). Legacy multipliers, once you start collecting stars, also compound multiplicatively. The Estate panel itself shows the live affinity per row so you can read the current bonus at a glance.",
+        legacy_p1: "Legacy is the personal-prestige loop, surfaced in Settings → Legacy once you've earned your first star. You get one star every 5 levels (idempotent — the milestone watermark prevents re-grinding from zero after an Ascend). Spend stars on permanent multipliers (Hero Attack, Estate Yield, Mission Gold); cost curve doubles each level. Ascend is the optional soft-reset that wipes gold, gear, Estate, and the active battle while keeping stars, level, mission count, skills, and achievements — opt-in, never forced.",
+        area_graph_p1: "World Map is a graph, not a list — areas unlock if you meet the level requirement AND have the clear-count in any one predecessor. Branches off Forest Road (Deep Forest, Eastern paths) and Mountain Pass (Snowfields) let you choose specialisation routes that match your Form. Each card's '↑ Predecessor' label shows which upstream area unlocked it; the row layout grows downward as new zones ship.",
     };
 
     pub const RU: Self = Self {
@@ -1146,6 +1162,7 @@ impl HelpBody {
         stats_p1: "Уровень вычисляется из накопленного опыта. Требуемый опыт растёт в 1.5 раза за ступень (100, 150, 225, 337…). Базовые характеристики статичны: ОЗ = 20 + ур×5, Атака = 5 + ур×2, Защита = 5 + ур×2. Снаряжение, форма и навыки складываются сверху; ничего другого не влияет (золото/эссенция не перетекают в боевые статы).",
         stats_p2: "ОЗ убывают в бою и восстанавливаются со временем (полное восстановление за 180 секунд реального времени). Зелье моментально доводит ОЗ до максимума.",
         forms_p1: "Поражение не-обычному врагу навсегда превращает тебя в этого монстра. У каждой формы своя маска слотов: Слизь носит только Шлем + Кольцо, Кот — Шлем/Плащ/Сапоги/Кольцо и так далее. Характеристики подстраиваются под форму. Каждая форма, в которой ты побывал, оставляет постоянный Навык — даже после возврата в Человека бонусы сохраняются. Это и есть петля престижа.",
+        forms_p2: "Форма ещё и определяет аффинити Поместья: пока ты в данной форме, работники подходящих звеньев приносят больше, остальные — меньше. Конь усиливает Работника + Собирателя, Дракон — Торговца + Мудреца, Кот — Собирателя + Мудреца, Слизь даёт +30% по всем звеньям, Человек нейтрален. В Магазине есть платная секция Формы — можно купить нужный облик напрямую, не дожидаясь поражения. Человек — дешёвый сброс, остальные четыре — стратегическое вложение.",
         tabs: &[
             "🛡 Ферма — герой, живая сцена боя (полоски ОЗ, кнопки очереди действий), сюжет, Мировой Босс, ресурсы.",
             "🗺 Карта мира — смена области фарма. Высокие области требуют уровня, но платят больше (или иначе — Лес даёт эссенцию, Гора — золото, Логово Босса — урон).",
@@ -1163,6 +1180,10 @@ impl HelpBody {
         delegate_p2: "Чтобы перенести личность на другой узел, открой Настройки → Экспорт ключа — вернётся 32-байтовый секретный ключ; скопируй один раз и вставь на новом узле. «Сброс прогресса» обнуляет инвентарь (золото, снаряжение, навыки, достижения), но сохраняет публичный ключ — таблица лидеров продолжит тебя узнавать. Чтобы полностью уничтожить личность, удали `~/.config/freenet/secrets/local/<delegate-key>/`.",
         guilds_p1: "Вкладка Гильдии — первое взаимодействие игроков за пределами таблицы лидеров: кооперативные группы, один ключ на гильдию, до 50 участников. Создай новую или вступи в существующую — лидер передаётся автоматически при уходе. Игровые механики (общий босс, вклад участников) появятся позже.",
         guilds_p2: "Секция Почта в Настройки → Продвинутые — это лог с подписями, на котором будут строиться сообщения между игроками: подарки, приглашения, обменные предложения. Отправь тестовое сообщение себе, чтобы убедиться, что цикл работает.",
+        estate_p1: "Поместье — это долгая петля пассивного дохода на вкладке Ферма. Нанимай работников в четырёх звеньях: Работник (пшеница), Собиратель (больше пшеницы), Торговец (золото), Мудрец (эссенция) — цена растёт как 1.07ⁿ. Доход капает, пока Поместье выбрано как активное простойное действие; кап — около часа симуляции при возврате. Поместье ставит на паузу авто-миссию и блокирует Run Mission: ты сам выбираешь, чем заниматься прямо сейчас. Стратегическая ось — на какую петлю ты сел.",
+        estate_p2: "Аффинити формы накладывается сверху: текущая форма усиливает или ослабляет конкретные звенья (см. Формы выше). Множители Наследия, когда начнёшь собирать звёзды, тоже компонуются мультипликативно. На самой панели Поместья показано живое аффинити в каждой строке, чтобы текущий бонус читался с одного взгляда.",
+        legacy_p1: "Наследие — личная петля престижа, появляется в Настройки → Наследие после первой полученной звезды. Звезда даётся каждые 5 уровней (идемпотентно — водяной знак не даёт переграбить звёзды повторно после Вознесения). Звёзды тратятся на постоянные множители (Атака, Доход Поместья, Золото за миссии); цена удваивается с каждым уровнем. Вознестись — необязательный мягкий сброс: золото, экипировка, Поместье и текущий бой обнуляются, но звёзды, уровень, счётчик миссий, навыки и достижения остаются. Чисто опциональная механика, никто не заставляет.",
+        area_graph_p1: "Карта мира — граф, а не список: новая область открывается, если уровень соответствует требованию И в любой из предшествующих областей набран нужный счёт зачисток. От Лесной дороги ответвляются Глубокий лес и восточные тропы, от Горного перевала — Снежные равнины: можно выбрать маршрут под свою форму. Подпись «↑ Предшественник» под линией соединения указывает, откуда открыли область; ряд за рядом граф растёт вниз по мере добавления зон.",
     };
 }
 
@@ -1354,6 +1375,9 @@ pub enum MessageId {
     HelpWorldBoss,
     HelpDelegateWhat,
     HelpGuildsMailbox,
+    HelpEstate,
+    HelpLegacy,
+    HelpAreaGraph,
 
     // Estate panel (B2).
     PanelEstate,

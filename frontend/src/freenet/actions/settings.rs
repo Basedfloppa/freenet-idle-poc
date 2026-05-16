@@ -48,6 +48,13 @@ pub struct Settings {
     /// the "What's new" section of the modal so the player sees
     /// changes shipped while they were away.
     pub last_seen_version: Option<String>,
+    /// `started_ms` watermark of the most-recently-acknowledged
+    /// catchup summary. The modal only re-fires when the delegate
+    /// reports a `last_catchup` with a started_ms newer than this
+    /// — survives reloads so a dismissed banner stays dismissed
+    /// even though the delegate still has the same offline window
+    /// in persisted state.
+    pub last_catchup_acked_started_ms: Option<u64>,
 }
 
 /// Load the delegate-persisted settings blob and mirror its fields
@@ -127,6 +134,7 @@ pub fn save_settings_once(
     tutorial_dismissed_override: Option<bool>,
     locale_override: Option<String>,
     last_seen_version_override: Option<String>,
+    last_catchup_acked_override: Option<u64>,
 ) {
     let (ws, delegate_key, payload) = {
         let g = core.borrow();
@@ -149,12 +157,16 @@ pub fn save_settings_once(
         });
         let locale = locale_override.or_else(|| Some(locale_code(c.prefs.locale).to_string()));
         let last_seen_version = last_seen_version_override.or_else(|| c.last_seen_version.clone());
+        let last_catchup_acked_started_ms = last_catchup_acked_override
+            .map(Some)
+            .unwrap_or_else(|| Some(c.last_catchup_acked_started_ms));
         let settings = Settings {
             display_name,
             theme,
             tutorial_dismissed,
             locale,
             last_seen_version,
+            last_catchup_acked_started_ms,
         };
         let payload = match serde_json::to_vec(&settings) {
             Ok(b) => b,
@@ -221,5 +233,8 @@ fn apply_settings(c: &mut crate::app::Core, settings: Settings) {
     }
     if let Some(v) = settings.last_seen_version {
         c.last_seen_version = Some(v);
+    }
+    if let Some(t) = settings.last_catchup_acked_started_ms {
+        c.last_catchup_acked_started_ms = t;
     }
 }

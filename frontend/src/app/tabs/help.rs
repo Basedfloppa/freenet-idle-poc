@@ -28,6 +28,17 @@ pub fn render_help_tab(locale: Locale) -> Html {
 
                 <h3>{ locale.tr(MessageId::HelpFormsTransformation) }</h3>
                 <p>{ body.forms_p1 }</p>
+                <p>{ body.forms_p2 }</p>
+
+                <h3>{ locale.tr(MessageId::HelpAreaGraph) }</h3>
+                <p>{ body.area_graph_p1 }</p>
+
+                <h3>{ locale.tr(MessageId::HelpEstate) }</h3>
+                <p>{ body.estate_p1 }</p>
+                <p>{ body.estate_p2 }</p>
+
+                <h3>{ locale.tr(MessageId::HelpLegacy) }</h3>
+                <p>{ body.legacy_p1 }</p>
 
                 <h3>{ locale.tr(MessageId::HelpTabs) }</h3>
                 <ul class="help-tab-list">
