@@ -411,6 +411,26 @@ pub fn render_core(
     let on_use_fireball = mk_use_cb(CONSUMABLE_FIREBALL);
     let on_buy_potion = mk_buy_cb(CONSUMABLE_POTION);
     let on_buy_fireball = mk_buy_cb(CONSUMABLE_FIREBALL);
+    // Sell-stack callbacks: empty the whole pile for `count ×
+    // unit_price / 2` gold. `amount == 0` is the wire signal
+    // for "sell all" the delegate understands.
+    let mk_sell_consumable_cb = {
+        let core = core_cell.clone();
+        let pending = pending.clone();
+        let bump = bump.clone();
+        move |kind: u8| {
+            let core = core.clone();
+            let pending = pending.clone();
+            let bump = bump.clone();
+            Callback::from(move |_| {
+                crate::freenet::actions::shop::sell_consumable_once(
+                    core.clone(), pending.clone(), bump.clone(), kind, 0,
+                )
+            })
+        }
+    };
+    let on_sell_potions = mk_sell_consumable_cb(CONSUMABLE_POTION);
+    let on_sell_fireballs = mk_sell_consumable_cb(CONSUMABLE_FIREBALL);
 
     // Buy-form callback factory (one closure per form id). Used by
     // the shop's Forms panel — cheap Human reset + expensive
@@ -1736,24 +1756,57 @@ pub fn render_core(
                                     <span class="desc muted">
                                         { locale.tr(MessageId::PotionShopDesc) }
                                     </span>
-                                    <button
-                                        onclick={on_buy_potion}
-                                        disabled={inv.gold < POTION_PRICE}
-                                    >
-                                        { locale.fmt_buy_gold(POTION_PRICE) }
-                                    </button>
+                                    <div class="shop-item-actions">
+                                        <button
+                                            onclick={on_buy_potion}
+                                            disabled={inv.gold < POTION_PRICE}
+                                        >
+                                            { locale.fmt_buy_gold(POTION_PRICE) }
+                                        </button>
+                                        {
+                                            // Sell-stack button — half the buy price per
+                                            // potion, label embeds the total gain so the
+                                            // player sees what the click is worth at a glance.
+                                            if inv.potions > 0 {
+                                                let unit = shared::consumable_sell_price(
+                                                    CONSUMABLE_POTION).unwrap_or(0);
+                                                let total = unit.saturating_mul(inv.potions as u64);
+                                                html! {
+                                                    <button onclick={on_sell_potions.clone()}
+                                                            title={format!("sell all {} potions for {total} gold", inv.potions)}>
+                                                        { format!("sell ×{} ({total}g)", inv.potions) }
+                                                    </button>
+                                                }
+                                            } else { html! {} }
+                                        }
+                                    </div>
                                 </div>
                                 <div class="shop-item">
                                     <span class="name">{ locale.tr(MessageId::ItemFireball) }</span>
                                     <span class="desc muted">
                                         { format!("{FIREBALL_BOSS_DAMAGE} instant boss damage") }
                                     </span>
-                                    <button
-                                        onclick={on_buy_fireball}
-                                        disabled={inv.gold < FIREBALL_PRICE}
-                                    >
-                                        { locale.fmt_buy_gold(FIREBALL_PRICE) }
-                                    </button>
+                                    <div class="shop-item-actions">
+                                        <button
+                                            onclick={on_buy_fireball}
+                                            disabled={inv.gold < FIREBALL_PRICE}
+                                        >
+                                            { locale.fmt_buy_gold(FIREBALL_PRICE) }
+                                        </button>
+                                        {
+                                            if inv.fireballs > 0 {
+                                                let unit = shared::consumable_sell_price(
+                                                    CONSUMABLE_FIREBALL).unwrap_or(0);
+                                                let total = unit.saturating_mul(inv.fireballs as u64);
+                                                html! {
+                                                    <button onclick={on_sell_fireballs.clone()}
+                                                            title={format!("sell all {} fireballs for {total} gold", inv.fireballs)}>
+                                                        { format!("sell ×{} ({total}g)", inv.fireballs) }
+                                                    </button>
+                                                }
+                                            } else { html! {} }
+                                        }
+                                    </div>
                                 </div>
                             </div>
                         </section>

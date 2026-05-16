@@ -25,6 +25,19 @@ pub const FIREBALL_BOSS_DAMAGE: u64 = 25;
 pub const CONSUMABLE_POTION: u8 = 0;
 pub const CONSUMABLE_FIREBALL: u8 = 1;
 
+/// Buy-back price the merchant pays for a single consumable.
+/// Half of the buy price (round-down) — same convention as
+/// `gear_sell_price`. Players who over-stockpiled potions can
+/// liquidate without feeling like the shop is ripping them off
+/// at vendor-trash rates.
+pub fn consumable_sell_price(kind: u8) -> Option<u64> {
+    match kind {
+        CONSUMABLE_POTION => Some(POTION_PRICE / 2),
+        CONSUMABLE_FIREBALL => Some(FIREBALL_PRICE / 2),
+        _ => None,
+    }
+}
+
 pub fn shop_buy_price(tier: u8) -> u64 {
     match tier {
         1 => 100,

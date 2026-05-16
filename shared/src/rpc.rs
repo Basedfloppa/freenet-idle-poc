@@ -211,6 +211,12 @@ pub enum DelegateRequest {
     /// post-mutation inventory with `count × gear_sell_price(tier)`
     /// gold added and the rows removed from `unequipped`.
     SellGearAll { catalog_id: u16, now_ms: u64 },
+    /// Sell `amount` copies of a consumable (`kind` =
+    /// `CONSUMABLE_POTION` / `CONSUMABLE_FIREBALL`) at the
+    /// merchant's buy-back rate (`consumable_sell_price`).
+    /// `amount == 0` is treated as "sell all of this kind" so a
+    /// single click can empty an overstocked stockpile.
+    SellConsumable { kind: u8, amount: u32, now_ms: u64 },
 }
 
 /// Domain split for blob-encoded persisted state. Each variant maps

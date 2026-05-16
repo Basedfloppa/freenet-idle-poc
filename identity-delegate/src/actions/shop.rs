@@ -3,8 +3,8 @@
 use freenet_stdlib::prelude::*;
 
 use shared::{
-    skill_buy_price, Inventory, CONSUMABLE_FIREBALL, CONSUMABLE_POTION, FIREBALL_BOSS_DAMAGE,
-    FIREBALL_PRICE, POTION_PRICE,
+    consumable_sell_price, skill_buy_price, Inventory, CONSUMABLE_FIREBALL, CONSUMABLE_POTION,
+    FIREBALL_BOSS_DAMAGE, FIREBALL_PRICE, POTION_PRICE,
 };
 
 use crate::derived::max_hp_of;
@@ -62,6 +62,41 @@ pub fn buy_item(
     } else {
         inv.fireballs = inv.fireballs.saturating_add(1);
     }
+    save_inventory(ctx, &mut inv)?;
+    Ok(inv)
+}
+
+/// Sell `amount` copies of a consumable at half its buy price.
+/// `amount == 0` means "sell every copy on hand". The delegate
+/// is authoritative on inventory counts, so a tampered webapp
+/// asking to sell more than is owned just gets the available
+/// stack liquidated (clamped, not rejected).
+pub fn sell_consumable(
+    ctx: &mut DelegateCtx,
+    kind: u8,
+    amount: u32,
+    now_ms: u64,
+) -> Result<Inventory, String> {
+    let mut inv = load_inventory_raw(ctx);
+    enter_action(&mut inv, now_ms)?;
+    let unit_price = consumable_sell_price(kind)
+        .ok_or_else(|| format!("unknown consumable kind {kind}"))?;
+    let on_hand = match kind {
+        CONSUMABLE_POTION => inv.potions,
+        CONSUMABLE_FIREBALL => inv.fireballs,
+        _ => 0,
+    };
+    if on_hand == 0 {
+        return Err("nothing to sell".into());
+    }
+    let to_sell = if amount == 0 { on_hand } else { amount.min(on_hand) };
+    let gain = unit_price.saturating_mul(to_sell as u64);
+    match kind {
+        CONSUMABLE_POTION => inv.potions = inv.potions.saturating_sub(to_sell),
+        CONSUMABLE_FIREBALL => inv.fireballs = inv.fireballs.saturating_sub(to_sell),
+        _ => {}
+    }
+    inv.gold = inv.gold.saturating_add(gain);
     save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }

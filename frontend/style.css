@@ -478,6 +478,18 @@ h3 { font-size: 0.82em; color: var(--fg-muted); margin: 1em 0 0.4em; text-transf
     color: var(--tab-active-fg);
     cursor: default;
 }
+/* On the current-area card, the `.area-blurb` inherits the
+   global `.muted` colour which on the Dusk theme sits too close
+   to the gold-tinted background and disappears. Same for the
+   rewards / clear-count strip. Force the contrast for elements
+   *inside* the current card — they sit on a coloured backdrop
+   that the default muted shades weren't built for. */
+.area-card.current .area-blurb,
+.area-card.current .area-rewards,
+.area-card.current .area-rewards > span,
+.area-card.current .muted {
+    color: var(--fg-strong);
+}
 .area-card.locked {
     opacity: 0.55;
     cursor: not-allowed;
@@ -1348,9 +1360,13 @@ ul.ending-list { list-style: none; padding: 0; margin: 0.4em 0; display: flex; f
        stats + action buttons stay readable, and the listing
        packs wider when the panel has room. Replaces the
        previous single-column flex layout — a 30-item stash
-       fits in a few rows instead of scrolling forever. */
+       fits in a few rows instead of scrolling forever.
+       `auto-fit` (not `auto-fill`) collapses empty trailing
+       tracks: a 3-item stash on a 4-column-wide panel stretches
+       each card to fill 1/3 of the row instead of leaving a
+       blank 4th column hole. */
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 0.3em;
 }
 .stash-item {
@@ -1549,6 +1565,16 @@ table.buy-grid tr.disabled-row button { cursor: not-allowed; }
 .shop-item .name { font-weight: 600; }
 .shop-item .desc { font-size: 0.82em; }
 .shop-item button { white-space: nowrap; }
+/* Buy + sell-stack share the right-side action cell. Flex
+   stacks them vertically when they don't fit on one row; if
+   only the buy button is rendered (empty stash) the cell
+   shrinks naturally. */
+.shop-item .shop-item-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2em;
+    align-items: stretch;
+}
 
 /* World Boss bar. */
 .panel.boss { background: var(--hue-boss-bg); border-color: var(--hue-boss-border); }

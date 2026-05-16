@@ -175,6 +175,11 @@ impl DelegateInterface for IdentityDelegate {
             AppRequest::SellGearAll { catalog_id, now_ms } => {
                 map_inv(actions::sell_gear_all(ctx, catalog_id, now_ms))
             }
+            AppRequest::SellConsumable {
+                kind,
+                amount,
+                now_ms,
+            } => map_inv(actions::sell_consumable(ctx, kind, amount, now_ms)),
         };
 
         let out_envelope = DelegateEnvelopeOut {
