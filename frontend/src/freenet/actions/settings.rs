@@ -42,6 +42,12 @@ pub struct Settings {
     pub theme: Option<String>,
     pub tutorial_dismissed: Option<bool>,
     pub locale: Option<String>,
+    /// Last `CARGO_PKG_VERSION` the player saw acknowledged via the
+    /// catchup modal's "Got it" button (B4). Compared against the
+    /// current build's version on cold load — a mismatch surfaces
+    /// the "What's new" section of the modal so the player sees
+    /// changes shipped while they were away.
+    pub last_seen_version: Option<String>,
 }
 
 /// Load the delegate-persisted settings blob and mirror its fields
@@ -120,6 +126,7 @@ pub fn save_settings_once(
     theme_override: Option<String>,
     tutorial_dismissed_override: Option<bool>,
     locale_override: Option<String>,
+    last_seen_version_override: Option<String>,
 ) {
     let (ws, delegate_key, payload) = {
         let g = core.borrow();
@@ -141,11 +148,13 @@ pub fn save_settings_once(
             }
         });
         let locale = locale_override.or_else(|| Some(locale_code(c.prefs.locale).to_string()));
+        let last_seen_version = last_seen_version_override.or_else(|| c.last_seen_version.clone());
         let settings = Settings {
             display_name,
             theme,
             tutorial_dismissed,
             locale,
+            last_seen_version,
         };
         let payload = match serde_json::to_vec(&settings) {
             Ok(b) => b,
@@ -209,5 +218,8 @@ fn apply_settings(c: &mut crate::app::Core, settings: Settings) {
     }
     if matches!(settings.tutorial_dismissed, Some(true)) {
         c.onboarding_step = None;
+    }
+    if let Some(v) = settings.last_seen_version {
+        c.last_seen_version = Some(v);
     }
 }

@@ -10,6 +10,7 @@
 pub mod area;
 pub mod battle;
 pub mod dispatch;
+pub mod estate;
 pub mod farm;
 pub mod gear;
 pub mod messaging;
@@ -21,6 +22,7 @@ pub mod shop;
 pub use area::*;
 pub use battle::*;
 pub use dispatch::*;
+pub use estate::*;
 pub use farm::*;
 pub use gear::*;
 pub use messaging::*;

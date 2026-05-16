@@ -22,9 +22,22 @@ pub fn set_auto_run(
     enter_action(&mut inv, now_ms)?;
     // Catch up against the OLD setting first, so toggling off
     // doesn't silently drop the last few ticks the player earned.
+    // Drain both loops since idle actions are mutually exclusive
+    // (§5.6) — flipping auto-mission also implies leaving any
+    // other idle action.
     catch_up_auto(&mut inv, now_ms);
+    super::estate::tick_estate(&mut inv, now_ms);
     inv.auto_run_enabled = enabled;
     inv.auto_last_tick_ms = if enabled { now_ms } else { 0 };
+    inv.idle_action = if enabled {
+        shared::IDLE_ACTION_AUTO_MISSION
+    } else {
+        shared::IDLE_ACTION_NONE
+    };
+    // Pausing the Estate when auto-mission turns on (and vice
+    // versa) — the single-active-action rule means only one
+    // accrual clock can advance at a time.
+    inv.estate.last_tick_ms = 0;
     save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }

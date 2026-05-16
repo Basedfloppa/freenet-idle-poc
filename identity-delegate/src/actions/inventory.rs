@@ -8,6 +8,7 @@ use crate::progression::check_achievements;
 use crate::state::{enter_action, load_inventory_raw, save_inventory};
 
 use super::battle::catch_up_auto;
+use super::estate::tick_estate;
 
 /// Read-and-touch: apply HP regen, simulate any offline auto-mission
 /// ticks that elapsed since the last call, run achievement evaluation,
@@ -17,6 +18,7 @@ pub fn touch_inventory(ctx: &mut DelegateCtx, now_ms: u64) -> Result<Inventory, 
     let mut inv = load_inventory_raw(ctx);
     enter_action(&mut inv, now_ms)?;
     catch_up_auto(&mut inv, now_ms);
+    tick_estate(&mut inv, now_ms);
     check_achievements(&mut inv, now_ms);
     save_inventory(ctx, &mut inv)?;
     Ok(inv)

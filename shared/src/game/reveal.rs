@@ -46,6 +46,8 @@ pub enum RevealKey {
     AutoMission = 7,
     /// Skills panel — essence-bought permanent buffs.
     Skills = 8,
+    /// Estate panel — multi-tier worker economy.
+    Estate = 9,
 }
 
 impl RevealKey {
@@ -60,6 +62,7 @@ impl RevealKey {
         RevealKey::Guilds,
         RevealKey::AutoMission,
         RevealKey::Skills,
+        RevealKey::Estate,
     ];
 
     #[inline]
@@ -104,6 +107,10 @@ pub fn predicate_for(key: RevealKey, inv: &InventoryV11, level: u64) -> bool {
         RevealKey::Guilds => level >= 5,
         RevealKey::AutoMission => inv.mission_count >= 25,
         RevealKey::Skills => inv.essence >= 100 || !inv.skills_unlocked.is_empty(),
+        // Estate unlocks once the player has enough gold to actually
+        // hire their first Farmhand. Avoids dead UI for new players
+        // who can't afford to play with it yet.
+        RevealKey::Estate => inv.gold >= 50,
     }
 }
 
@@ -159,6 +166,9 @@ pub fn derive_initial_reveals_v10(v10: &InventoryV10) -> u64 {
     }
     if v10.essence >= 100 || !v10.skills_unlocked.is_empty() {
         bits |= RevealKey::Skills.bit();
+    }
+    if v10.gold >= 50 {
+        bits |= RevealKey::Estate.bit();
     }
     bits
 }

@@ -16,6 +16,7 @@
 
 pub mod area;
 pub mod battle;
+pub mod estate;
 pub mod farm;
 pub mod gear;
 pub mod inventory;
@@ -25,6 +26,7 @@ pub mod shop;
 
 pub use area::*;
 pub use battle::*;
+pub use estate::*;
 pub use farm::*;
 pub use gear::*;
 pub use inventory::*;

@@ -156,6 +156,15 @@ pub enum DelegateRequest {
     /// write is the caller's responsibility — the delegate does not
     /// merge; each save replaces the entire blob for that kind.
     SaveBlob { kind: BlobKind, payload: Vec<u8> },
+    /// Hire one more worker of the given Estate tier. Refused if
+    /// the player can't afford the next-worker gold price.
+    /// (Backlog B2.)
+    BuyEstateWorker { tier_id: u8, now_ms: u64 },
+    /// Switch the single active idle action (§5.6). Setting to
+    /// `IDLE_ACTION_AUTO_MISSION` mirrors `SetAutoRun(true)`;
+    /// `IDLE_ACTION_ESTATE` pauses auto-mission and starts ticking
+    /// the Estate; `IDLE_ACTION_NONE` pauses both.
+    SetIdleAction { action: u8, now_ms: u64 },
 }
 
 /// Domain split for blob-encoded persisted state. Each variant maps

@@ -276,10 +276,71 @@ impl InventoryV11 {
     }
 }
 
+/// V12 — adds Estate worker economy (backlog B2) + `idle_action`
+/// selector (§5.6: idle actions are mutually exclusive).
+///
+/// Additive composition over `InventoryV11`. Same wire-format rule
+/// as V11: bincode concatenates struct fields, so persisted V12 blobs
+/// are byte-identical to a flat layout. Older blobs continue to
+/// decode via the `From<InventoryV11>` migration below.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InventoryV12 {
+    pub base: InventoryV11,
+    /// Estate state — worker counts + last yield tick.
+    pub estate: super::estate::EstateState,
+    /// Single active idle action (`IDLE_ACTION_*` constants). The
+    /// delegate ticks exactly one of `auto_run_enabled` or the
+    /// Estate yield loop depending on the value here; the legacy
+    /// `auto_run_enabled` field still drives auto-mission and is
+    /// kept in sync by `SetAutoRun` / `SetIdleAction`.
+    pub idle_action: u8,
+}
+
+impl Default for InventoryV12 {
+    fn default() -> Self {
+        Self {
+            base: InventoryV11::default(),
+            estate: super::estate::EstateState::default(),
+            idle_action: super::estate::IDLE_ACTION_NONE,
+        }
+    }
+}
+
+impl std::ops::Deref for InventoryV12 {
+    type Target = InventoryV11;
+    fn deref(&self) -> &InventoryV11 {
+        &self.base
+    }
+}
+
+impl std::ops::DerefMut for InventoryV12 {
+    fn deref_mut(&mut self) -> &mut InventoryV11 {
+        &mut self.base
+    }
+}
+
+impl From<InventoryV11> for InventoryV12 {
+    /// `estate` starts empty; `idle_action` derives from the legacy
+    /// `auto_run_enabled` flag so returning players who had auto-mission
+    /// on stay in that mode after the schema bump.
+    fn from(v11: InventoryV11) -> Self {
+        let idle_action = if v11.base.auto_run_enabled {
+            super::estate::IDLE_ACTION_AUTO_MISSION
+        } else {
+            super::estate::IDLE_ACTION_NONE
+        };
+        Self {
+            base: v11,
+            estate: super::estate::EstateState::default(),
+            idle_action,
+        }
+    }
+}
+
 /// Public name for "the current inventory shape". Every consumer
 /// imports `Inventory`; only the persistence layer in the delegate
 /// is aware that this is a versioned type.
-pub type Inventory = InventoryV11;
+pub type Inventory = InventoryV12;
 
 /// On-disk wrapper. Append new variants at the end — deleting or
 /// reordering breaks the bincode discriminant for existing blobs.
@@ -288,21 +349,23 @@ pub enum InventoryWire {
     V9(InventoryV9),
     V10(InventoryV10),
     V11(InventoryV11),
+    V12(InventoryV12),
 }
 
 impl InventoryWire {
     /// Migrate any historical variant to the current `Inventory`.
     pub fn into_latest(self) -> Inventory {
         match self {
-            Self::V9(v9) => InventoryV11::from(InventoryV10::from(v9)),
-            Self::V10(v10) => InventoryV11::from(v10),
-            Self::V11(v11) => v11,
+            Self::V9(v9) => InventoryV12::from(InventoryV11::from(InventoryV10::from(v9))),
+            Self::V10(v10) => InventoryV12::from(InventoryV11::from(v10)),
+            Self::V11(v11) => InventoryV12::from(v11),
+            Self::V12(v12) => v12,
         }
     }
 }
 
 impl From<Inventory> for InventoryWire {
     fn from(inv: Inventory) -> Self {
-        Self::V11(inv)
+        Self::V12(inv)
     }
 }

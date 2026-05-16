@@ -168,66 +168,44 @@ async fn connect_inner(
     }
     bump.set(now_ms());
 
-    // Probe-then-register: if `GetPubkey` succeeds the delegate is
-    // already on this node. Otherwise stage the bundled WASM and
-    // retry once — delegates aren't DHT-replicated so a fresh
-    // self-hosted node needs the manual provision.
+    // Register-then-probe: send the bundled-WASM RegisterDelegate
+    // unconditionally first, then probe. Probe-then-register would
+    // be cheaper for warm nodes, but if the delegate is missing the
+    // node may not return a ClientError on ApplicationMessages to an
+    // unknown key — `call().await` then hangs forever and the
+    // register path never fires. Always-register is idempotent
+    // (duplicate registration of an already-stored delegate is a
+    // no-op on the node) and the bundled WASM is local-served, so
+    // the cost is one cached fetch + one WS frame per (re)connect.
+    {
+        let mut g = core.borrow_mut();
+        if let Some(c) = g.as_mut() {
+            c.status = c.prefs.locale.tr(MessageId::StatusRegisteringDelegate).into();
+        }
+    }
+    bump.set(now_ms());
+    delegate_client::ensure_delegate_registered(ws.clone()).await?;
+    {
+        let mut g = core.borrow_mut();
+        if let Some(c) = g.as_mut() {
+            c.status = c.prefs.locale.tr(MessageId::StatusAskingDelegate).into();
+        }
+    }
+    bump.set(now_ms());
+
+    // WS FIFO ordering ensures the register lands before this probe.
     let seed = identity::random_seed_candidate();
-    let first_probe = delegate_client::call(
+    let pubkey = match delegate_client::call(
         ws.clone(),
         pending.clone(),
         &delegate_key,
-        AppRequest::GetPubkey {
-            seed_if_missing: seed.clone(),
-        },
+        AppRequest::GetPubkey { seed_if_missing: seed },
     )
-    .await;
-
-    let pubkey = match first_probe {
-        Ok(AppResponse::Pubkey { pubkey }) => pubkey,
-        Ok(AppResponse::Error(e)) => return Err(format!("delegate: {e}")),
-        Ok(other) => return Err(format!("unexpected delegate response: {other:?}")),
-        Err(first_err) => {
-            web_sys::console::warn_1(
-                &format!(
-                    "[delegate] GetPubkey probe failed ({first_err}); \
-                     attempting bundled-WASM register + retry"
-                )
-                .into(),
-            );
-            {
-                let mut g = core.borrow_mut();
-                if let Some(c) = g.as_mut() {
-                    c.status = c.prefs.locale.tr(MessageId::StatusRegisteringDelegate).into();
-                }
-            }
-            bump.set(now_ms());
-
-            delegate_client::ensure_delegate_registered(ws.clone()).await?;
-
-            {
-                let mut g = core.borrow_mut();
-                if let Some(c) = g.as_mut() {
-                    c.status = c.prefs.locale.tr(MessageId::StatusAskingDelegate).into();
-                }
-            }
-            bump.set(now_ms());
-
-            // Retry once. WS FIFO ordering ensures this lands after
-            // the register has been processed by the node.
-            match delegate_client::call(
-                ws.clone(),
-                pending.clone(),
-                &delegate_key,
-                AppRequest::GetPubkey { seed_if_missing: seed },
-            )
-            .await?
-            {
-                AppResponse::Pubkey { pubkey } => pubkey,
-                AppResponse::Error(e) => return Err(format!("delegate: {e}")),
-                other => return Err(format!("unexpected delegate response: {other:?}")),
-            }
-        }
+    .await?
+    {
+        AppResponse::Pubkey { pubkey } => pubkey,
+        AppResponse::Error(e) => return Err(format!("delegate: {e}")),
+        other => return Err(format!("unexpected delegate response: {other:?}")),
     };
 
     let inventory = match delegate_client::call(

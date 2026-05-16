@@ -114,11 +114,38 @@ pub struct Core {
     /// initial load establishes the baseline silently (no flood
     /// of "you unlocked X 200 missions ago" toasts on reconnect).
     pub shown_achievements: Option<std::collections::BTreeSet<u8>>,
+    /// Reveal-key bits that have already played their slide-in
+    /// animation in this session. Initialised on first inventory
+    /// load to the full `revealed` bitmask — returning players
+    /// don't see every section flash on reload. Subsequent
+    /// reveal-bit flips during the session animate once and
+    /// then land in this set so tab navigation doesn't replay.
+    pub revealed_animated: Option<u64>,
+    /// Reveal-key bits that should animate on the *current*
+    /// render pass — populated by `ingest_inventory` whenever a
+    /// new bit appears in `inv.revealed` for the first time this
+    /// session. Render reads it to gate the `reveal-anim` CSS
+    /// class. Naturally cleared by the next inventory update
+    /// (which recomputes from an updated `revealed_animated`),
+    /// so an in-flight reveal animates exactly once across the
+    /// short window before the next delegate tick.
+    pub animate_reveal: u64,
     /// Current step of the first-visit onboarding wizard. `None`
     /// = dismissed (or never shown). `Some(0..ONBOARDING_STEPS)`
     /// shows that step's modal. Persisted-as-dismissed via
     /// localStorage key `freenet-idle-onboarded`.
     pub onboarding_step: Option<u8>,
+    /// Last `CARGO_PKG_VERSION` the player acknowledged via the
+    /// catchup modal's "Got it" button (backlog B4). Loaded from
+    /// the delegate-stored `Settings` blob on connect; compared
+    /// against the current build's version to decide whether the
+    /// "What's new" section of the modal should appear.
+    pub last_seen_version: Option<String>,
+    /// Was the catchup / patchnotes modal dismissed in this
+    /// session? Resets to `false` on every reload so the modal
+    /// surfaces once per offline-return rather than blocking the
+    /// UI permanently after the first save.
+    pub catchup_modal_dismissed: bool,
 }
 
 /// Apply a fresh `Inventory` from the delegate into `Core`,
@@ -149,6 +176,25 @@ pub fn ingest_inventory(c: &mut Core, inv: Inventory) {
                 });
                 seen.insert(id);
             }
+        }
+    }
+    // Reveal-bit animation gating. First load is silent: the
+    // baseline is set to whatever the delegate already had
+    // unlocked, so a returning player doesn't see every section
+    // flash on reconnect. After that, any bit that's in
+    // `inv.revealed` but not yet in `revealed_animated` is
+    // "newly revealed" — surface it via `animate_reveal` for
+    // the upcoming render pass, then promote it into the
+    // baseline so the next ingest doesn't replay it.
+    match c.revealed_animated {
+        None => {
+            c.revealed_animated = Some(inv.revealed);
+            c.animate_reveal = 0;
+        }
+        Some(prev) => {
+            let newly = inv.revealed & !prev;
+            c.animate_reveal = newly;
+            c.revealed_animated = Some(prev | inv.revealed);
         }
     }
     c.inventory = inv;

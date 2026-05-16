@@ -62,7 +62,7 @@ pub fn load_inventory_raw(ctx: &mut DelegateCtx) -> Inventory {
         return wire.into_latest();
     }
     if let Ok(inv_v9) = bincode::deserialize::<InventoryV9>(&bytes) {
-        return shared::InventoryV11::from(InventoryV10::from(inv_v9));
+        return shared::InventoryV12::from(shared::InventoryV11::from(InventoryV10::from(inv_v9)));
     }
     Inventory::default()
 }

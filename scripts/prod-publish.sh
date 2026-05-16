@@ -24,6 +24,12 @@
 #   WEBSITE_KEY      default idle-poc    (`fdev website init` slot)
 #   PATCH_KEYS       default 1           (set to 0 to leave keys.rs alone)
 #   STAGE_WEBAPP     default 1           (set to 0 to stop after contracts)
+#   FORCE_REPUBLISH  default 0           (set to 1 to skip the
+#                                        "code hash matches keys.rs"
+#                                        optimization and re-publish
+#                                        every contract / delegate
+#                                        unconditionally — needed when
+#                                        the node lost its store)
 #
 # Usage examples:
 #   # via SSH tunnel forwarding orange's 7509 → local 17509
@@ -49,6 +55,7 @@ FDEV="${FDEV:-$HERE/../freenet-core/target/debug/fdev}"
 WEBSITE_KEY="${WEBSITE_KEY:-idle-poc}"
 PATCH_KEYS="${PATCH_KEYS:-1}"
 STAGE_WEBAPP="${STAGE_WEBAPP:-1}"
+FORCE_REPUBLISH="${FORCE_REPUBLISH:-0}"
 
 if [[ ! -x "$FDEV" ]]; then
     echo "[prod-publish] fdev not found at: $FDEV"
@@ -83,14 +90,23 @@ extract() {
     sed -E 's/\x1b\[[0-9;]*m//g' "$file" | grep -oP "$pattern" | tail -1 || true
 }
 
+# Read the string value of a `pub const NAME: &str = "…";` line from
+# keys.rs. Empty string when the constant is missing or empty.
+read_keys_const() {
+    local name="$1"
+    sed -nE "s/^pub const ${name}: &str = \"([^\"]+)\";.*/\\1/p" \
+        "$HERE/frontend/src/app/keys.rs"
+}
+
 build_and_publish_contract() {
     local crate="$1" artefact="$2" state_file="$3" label="$4"
     local out_hash_var="$5" out_id_var="$6"
+    local hash_const="$7" id_const="$8"
 
     echo "[prod-publish] building $label"
     cd "$HERE/$crate"
 
-    local build_log pub_log code_hash instance_id
+    local build_log pub_log code_hash instance_id prev_hash prev_id
     build_log="$(mktemp)"
     CARGO_TARGET_DIR="$PWD/target" "$FDEV" build 2>&1 | tee "$build_log"
     code_hash="$(extract 'code hash: \K\S+' "$build_log")"
@@ -98,19 +114,28 @@ build_and_publish_contract() {
         echo "[prod-publish] could not parse $label code hash"; exit 1
     fi
 
-    echo "[prod-publish] publishing $label to prod"
-    pub_log="$(mktemp)"
-    # No `--release` flag: `fdev publish` (commands.rs:60) bails on
-    # release=true with "Cannot publish contracts in the network yet".
-    # The target node (orange) runs in `network` mode and is a
-    # gateway, so a plain PUT received over WS propagates to the DHT
-    # automatically regardless of fdev's MODE.
-    CARGO_TARGET_DIR="$PWD/target" "$FDEV" "${NODE_ARGS[@]}" publish \
-        --code "build/freenet/$artefact" \
-        contract --state "$state_file" 2>&1 | tee "$pub_log"
-    instance_id="$(extract 'Publishing contract \K[1-9A-HJ-NP-Za-km-z]{30,}' "$pub_log")"
-    if [[ -z "$instance_id" ]]; then
-        echo "[prod-publish] could not parse $label instance id"; exit 1
+    # Skip the publish when the freshly-built code hash matches what's
+    # already baked into keys.rs — the on-network contract is
+    # byte-identical so re-publishing would just re-issue the same
+    # instance id and waste a PUT round-trip. Override via
+    # FORCE_REPUBLISH=1 if the node lost its store.
+    prev_hash="$(read_keys_const "$hash_const")"
+    prev_id="$(read_keys_const "$id_const")"
+    if [[ "$FORCE_REPUBLISH" != "1" \
+          && -n "$prev_hash" && "$prev_hash" == "$code_hash" \
+          && -n "$prev_id" ]]; then
+        echo "[prod-publish] $label code hash unchanged ($code_hash) — skipping publish, reusing id $prev_id"
+        instance_id="$prev_id"
+    else
+        echo "[prod-publish] publishing $label to prod"
+        pub_log="$(mktemp)"
+        CARGO_TARGET_DIR="$PWD/target" "$FDEV" "${NODE_ARGS[@]}" publish \
+            --code "build/freenet/$artefact" \
+            contract --state "$state_file" 2>&1 | tee "$pub_log"
+        instance_id="$(extract 'Publishing contract \K[1-9A-HJ-NP-Za-km-z]{30,}' "$pub_log")"
+        if [[ -z "$instance_id" ]]; then
+            echo "[prod-publish] could not parse $label instance id"; exit 1
+        fi
     fi
 
     printf -v "$out_hash_var" '%s' "$code_hash"
@@ -120,15 +145,18 @@ build_and_publish_contract() {
 ###############################################################################
 build_and_publish_contract \
     presence-contract presence_contract "$PRESENCE_STATE" "presence-contract" \
-    CODE_HASH CONTRACT_ID
+    CODE_HASH CONTRACT_ID \
+    CODE_HASH_B58 CONTRACT_ID_B58
 
 build_and_publish_contract \
     mailbox-contract mailbox_contract "$MAILBOX_STATE" "mailbox-contract" \
-    MAILBOX_CODE_HASH MAILBOX_ID
+    MAILBOX_CODE_HASH MAILBOX_ID \
+    MAILBOX_CODE_HASH_B58 MAILBOX_CONTRACT_ID_B58
 
 build_and_publish_contract \
     guilds-contract guilds_contract "$GUILDS_STATE" "guilds-contract" \
-    GUILDS_CODE_HASH GUILDS_ID
+    GUILDS_CODE_HASH GUILDS_ID \
+    GUILDS_CODE_HASH_B58 GUILDS_CONTRACT_ID_B58
 
 ###############################################################################
 # Delegate — no initial state; `key:` line instead of `Publishing
@@ -144,14 +172,24 @@ if [[ -z "$DELEGATE_CODE_HASH" ]]; then
     echo "[prod-publish] could not parse delegate code hash"; exit 1
 fi
 
-echo "[prod-publish] publishing identity-delegate to prod"
-DELEGATE_PUB_LOG="$(mktemp)"
-CARGO_TARGET_DIR="$PWD/target" "$FDEV" "${NODE_ARGS[@]}" publish \
-    --code build/freenet/identity_delegate \
-    delegate 2>&1 | tee "$DELEGATE_PUB_LOG"
-DELEGATE_KEY="$(extract 'key: \K[1-9A-HJ-NP-Za-km-z]{30,}' "$DELEGATE_PUB_LOG")"
-if [[ -z "$DELEGATE_KEY" ]]; then
-    echo "[prod-publish] could not parse delegate key"; exit 1
+# Same skip-if-unchanged optimization as for contracts.
+PREV_DELEGATE_HASH="$(read_keys_const DELEGATE_CODE_HASH_B58)"
+PREV_DELEGATE_KEY="$(read_keys_const DELEGATE_KEY_B58)"
+if [[ "$FORCE_REPUBLISH" != "1" \
+      && -n "$PREV_DELEGATE_HASH" && "$PREV_DELEGATE_HASH" == "$DELEGATE_CODE_HASH" \
+      && -n "$PREV_DELEGATE_KEY" ]]; then
+    echo "[prod-publish] delegate code hash unchanged ($DELEGATE_CODE_HASH) — skipping publish, reusing key $PREV_DELEGATE_KEY"
+    DELEGATE_KEY="$PREV_DELEGATE_KEY"
+else
+    echo "[prod-publish] publishing identity-delegate to prod"
+    DELEGATE_PUB_LOG="$(mktemp)"
+    CARGO_TARGET_DIR="$PWD/target" "$FDEV" "${NODE_ARGS[@]}" publish \
+        --code build/freenet/identity_delegate \
+        delegate 2>&1 | tee "$DELEGATE_PUB_LOG"
+    DELEGATE_KEY="$(extract 'key: \K[1-9A-HJ-NP-Za-km-z]{30,}' "$DELEGATE_PUB_LOG")"
+    if [[ -z "$DELEGATE_KEY" ]]; then
+        echo "[prod-publish] could not parse delegate key"; exit 1
+    fi
 fi
 
 # Stage the versioned delegate WASM into the frontend so trunk's

@@ -18,11 +18,11 @@ use yew::prelude::*;
 
 use super::i18n_shared;
 use crate::freenet::actions::{
-    auto_equip_once, buy_gear_once, buy_item_once, buy_skill_once, equip_gear_once,
-    export_seed_once, forge_upgrade_once, guild_op_once, queue_battle_action_once,
-    reset_inventory_once, run_mission_once, sell_gear_once, sell_wheat_once,
-    send_message_once, set_area_once, set_auto_run_once, unequip_slot_once,
-    use_consumable_once, work_farm_once,
+    auto_equip_once, buy_estate_worker_once, buy_gear_once, buy_item_once, buy_skill_once,
+    equip_gear_once, export_seed_once, forge_upgrade_once, guild_op_once,
+    queue_battle_action_once, reset_inventory_once, run_mission_once, sell_gear_once,
+    sell_wheat_once, send_message_once, set_area_once, set_auto_run_once,
+    set_idle_action_once, unequip_slot_once, use_consumable_once, work_farm_once,
 };
 use crate::game::derived::{
     area_of_name, attack_from, defence_from, equipped_bonuses, max_hp_from,
@@ -50,9 +50,9 @@ use super::prefs::{apply_theme, clear_all_prefs, save_prefs, SyncCadence, THEMES
 use super::types::{Tab, ToggleField};
 use super::util::{now_ms, truncate, webapp_contract_id};
 use super::widgets::{
-    render_area_card, render_battle_queue, render_battle_stage, render_catchup_banner,
-    render_combat_history, render_debug_overlay, render_equipped_slot, render_mailbox_panel,
-    render_onboarding, render_stash_grouped, render_toasts, top_actions,
+    render_area_card, render_battle_queue, render_battle_stage,
+    render_catchup_modal, render_combat_history, render_debug_overlay, render_equipped_slot,
+    render_mailbox_panel, render_onboarding, render_stash_grouped, render_toasts, top_actions,
 };
 use super::core::{CoreCell, PendingCell};
 
@@ -90,6 +90,7 @@ pub fn render_core(
                 pending.clone(),
                 bump.clone(),
                 Some(new_name),
+                None,
                 None,
                 None,
                 None,
@@ -403,6 +404,57 @@ pub fn render_core(
         }
     };
 
+    // Factory for the per-tier "Hire" button in the Estate panel.
+    // Captures `tier_id` so the inner Callback can fire the right
+    // RPC. Same pattern as `mk_buy_skill_cb`.
+    let mk_buy_worker_cb = {
+        let core = core_cell.clone();
+        let pending = pending.clone();
+        let bump = bump.clone();
+        move |tier_id: u8| {
+            let core = core.clone();
+            let pending = pending.clone();
+            let bump = bump.clone();
+            Callback::from(move |_| {
+                buy_estate_worker_once(core.clone(), pending.clone(), bump.clone(), tier_id)
+            })
+        }
+    };
+
+    // Estate idle-action toggle — flips between ESTATE and NONE
+    // (single-active rule from §5.6, auto-mission button has its
+    // own callback). The delegate's `SetIdleAction` keeps
+    // `auto_run_enabled` in sync.
+    let on_toggle_estate = {
+        let core = core_cell.clone();
+        let pending = pending.clone();
+        let bump = bump.clone();
+        Callback::from(move |_| {
+            let next = {
+                let g = core.borrow();
+                let Some(c) = g.as_ref() else { return };
+                if c.inventory.idle_action == shared::IDLE_ACTION_ESTATE {
+                    shared::IDLE_ACTION_NONE
+                } else {
+                    shared::IDLE_ACTION_ESTATE
+                }
+            };
+            let now = now_ms();
+            if let Some(c) = core.borrow_mut().as_mut() {
+                c.inventory.idle_action = next;
+                if next == shared::IDLE_ACTION_ESTATE {
+                    c.inventory.estate.last_tick_ms = now;
+                    c.inventory.auto_run_enabled = false;
+                    c.inventory.auto_last_tick_ms = 0;
+                } else {
+                    c.inventory.estate.last_tick_ms = 0;
+                }
+            }
+            bump.set(now);
+            set_idle_action_once(core.clone(), pending.clone(), bump.clone(), next);
+        })
+    };
+
     let on_toggle_auto = {
         let core = core_cell.clone();
         let pending = pending.clone();
@@ -453,6 +505,7 @@ pub fn render_core(
                     Some(theme_id.to_string()),
                     None,
                     None,
+                    None,
                 );
                 bump.set(now_ms());
             })
@@ -487,6 +540,7 @@ pub fn render_core(
                     None,
                     None,
                     Some(code.to_string()),
+                    None,
                 );
                 bump.set(now_ms());
             })
@@ -680,6 +734,7 @@ pub fn render_core(
                     None,
                     Some(true),
                     None,
+                    None,
                 );
             }
             bump.set(now_ms());
@@ -701,6 +756,36 @@ pub fn render_core(
                 None,
                 Some(true),
                 None,
+                None,
+            );
+            bump.set(now_ms());
+        })
+    };
+
+    let on_catchup_dismiss = {
+        let core = core_cell.clone();
+        let pending = pending.clone();
+        let bump = bump.clone();
+        Callback::from(move |_: MouseEvent| {
+            let version = env!("BUILD_VERSION").to_string();
+            if let Some(c) = core.borrow_mut().as_mut() {
+                c.catchup_modal_dismissed = true;
+                c.last_seen_version = Some(version.clone());
+                // The offline-catchup summary is single-shot — clear
+                // it locally so re-renders within this session don't
+                // re-pop the modal even before the next mission
+                // wipes it on the delegate side.
+                c.inventory.last_catchup = None;
+            }
+            crate::freenet::actions::settings::save_settings_once(
+                core.clone(),
+                pending.clone(),
+                bump.clone(),
+                None,
+                None,
+                None,
+                None,
+                Some(version),
             );
             bump.set(now_ms());
         })
@@ -779,18 +864,23 @@ pub fn render_core(
     let mission_disabled = my.is_none() || c.mission_in_flight;
 
     let inv = &c.inventory;
+    // Reveal-bit slide-in animation is gated to the keys that just
+    // flipped on this delegate tick. `ingest_inventory` clears
+    // `animate_reveal` on the next ingest, so a section animates
+    // exactly once even if the player switches tabs in and out.
+    // Returning players see `animate_reveal == 0` on cold load.
+    let anim_cls = |key: shared::RevealKey| -> &'static str {
+        if c.animate_reveal & key.bit() != 0 {
+            "reveal-anim"
+        } else {
+            ""
+        }
+    };
     let lvl = level_of(inv);
     let hp_max = max_hp_from(inv);
     let atk = attack_from(inv);
     let def = defence_from(inv);
-    // Chapter copy is rendered in two tab arms (Farm + WorldMap); the
-    // strings are owned `String`s and each arm consumes them into
-    // `Html`, so we keep two clone-friendly copies up here rather than
-    // calling `chapter()` twice (a tiny double allocation versus a
-    // borrow-checker dance).
-    let (chap_no, chap_title, chap_body) = i18n_shared::chapter(locale, inv);
-    let chap_body_farm = chap_body.clone();
-    let chap_body_map = chap_body;
+    let (chap_no, chap_title, chap_body_map) = i18n_shared::chapter(locale, inv);
     let area = area_of(inv.current_area);
     let _mission_gold = MISSION_GOLD.saturating_mul(area.gold_mult);
     let mission_essence = MISSION_ESSENCE.saturating_mul(area.essence_mult);
@@ -824,6 +914,7 @@ pub fn render_core(
         <main>
             { render_toasts(&c.toasts, now) }
             { render_onboarding(locale, c.onboarding_step, on_onboarding_next, on_onboarding_skip) }
+            { render_catchup_modal(c, locale, on_catchup_dismiss) }
             <header class="page-head">
                 <div class="title-row">
                     <h1>{ "Freenet Idle PoC" }</h1>
@@ -836,7 +927,7 @@ pub fn render_core(
                     // (tooltip) for diagnostics: which DHT-resolved
                     // bundle the user is actually running.
                     <span class="webapp-version" title={webapp_contract_id().unwrap_or_default()}>
-                        { "v" }{ env!("CARGO_PKG_VERSION") }
+                        { "v" }{ env!("BUILD_VERSION") }
                     </span>
                     <span class={status_pill_cls}>{ status_pill_text }</span>
                     <a class="repo-link"
@@ -864,7 +955,18 @@ pub fn render_core(
                     }
                 }).map(|(icon, label, tab)| {
                     let is_active = c.current_tab == *tab;
-                    let cls = if is_active { "icon-btn active" } else { "icon-btn" };
+                    let anim = match tab {
+                        Tab::WorldMap => anim_cls(shared::RevealKey::WorldMap),
+                        Tab::Shop => anim_cls(shared::RevealKey::Shop),
+                        Tab::Guilds => anim_cls(shared::RevealKey::Guilds),
+                        Tab::Achievements => anim_cls(shared::RevealKey::Achievements),
+                        Tab::Farm | Tab::Settings | Tab::Help => "",
+                    };
+                    let cls = classes!(
+                        "icon-btn",
+                        if is_active { "active" } else { "" },
+                        anim,
+                    );
                     html! {
                         <button
                             class={cls}
@@ -884,7 +986,6 @@ pub fn render_core(
             { match c.current_tab {
                 Tab::Farm => html! {
                     <>
-                        { render_catchup_banner(locale, &inv.last_catchup) }
                         {
                             if inv.mission_count == 0 {
                                 html! {
@@ -995,7 +1096,8 @@ pub fn render_core(
                                         // then they can automate it.
                                         if inv.revealed_has(shared::RevealKey::AutoMission) {
                                             html! {
-                                                <button onclick={on_toggle_auto}
+                                                <button class={classes!(anim_cls(shared::RevealKey::AutoMission))}
+                                                        onclick={on_toggle_auto}
                                                         disabled={my.is_none()}
                                                         title={
                                                             if inv.current_battle.is_some() {
@@ -1050,7 +1152,7 @@ pub fn render_core(
                             {
                                 if inv.revealed_has(shared::RevealKey::Equipment) {
                                     html! {
-                                        <article class="panel equipment">
+                                        <article class={classes!("panel", "equipment", anim_cls(shared::RevealKey::Equipment))}>
                                             <h2>{ locale.tr(MessageId::PanelEquipment) }</h2>
                                             <p class="muted small">{ locale.fmt_equipped_bonus(eq_atk, eq_def, eq_hp) }</p>
                                             <div class="action-row">
@@ -1085,7 +1187,7 @@ pub fn render_core(
                                                     html! {
                                                         <>
                                                             <h3>{ locale.tr(MessageId::PanelConsumables) }</h3>
-                                                            <div class="consumable-row">
+                                                            <div class={classes!("consumable-row", anim_cls(shared::RevealKey::Consumables))}>
                                                                 <span class="consumable">
                                                                     <span class="name">{ locale.tr(MessageId::ItemPotion) }</span>
                                                                     <span class="qty">{ inv.potions }</span>
@@ -1135,30 +1237,12 @@ pub fn render_core(
                             }
                         </section>
 
-                        <section class="panel plot">
-                            <h2>{ locale.tr(MessageId::PanelPlotSoFar) }</h2>
-                            {
-                                if inv.plot_seed != 0 {
-                                    let (home, mac, vil, mthd, dest) = i18n_shared::plot_tuple_l10n(locale, inv.plot_seed);
-                                    html! {
-                                        <p class="plot-backstory">
-                                            { locale.fmt_plot_backstory(home, mac, vil, mthd, dest) }
-                                        </p>
-                                    }
-                                } else {
-                                    html! {}
-                                }
-                            }
-                            <p class="chapter-no muted">{ locale.fmt_chapter(chap_no as u64) }</p>
-                            <p>{ chap_body_farm }</p>
-                        </section>
-
                         // Phased reveal (A5): World Boss panel
                         // appears at mission_count ≥ 10.
                         {
                             if inv.revealed_has(shared::RevealKey::WorldBoss) {
                                 html! {
-                                    <section class="panel boss">
+                                    <section class={classes!("panel", "boss", anim_cls(shared::RevealKey::WorldBoss))}>
                                         <h2>{ locale.tr(MessageId::PanelWorldBoss) }</h2>
                                         <div class="hp-bar">
                                             <div class="hp-fill" style={format!("width: {boss_pct}%")}></div>
@@ -1172,6 +1256,91 @@ pub fn render_core(
                                                 rows.len(),
                                             ) }
                                         </p>
+                                    </section>
+                                }
+                            } else {
+                                html! {}
+                            }
+                        }
+
+                        // Estate panel (backlog B2). Phased-revealed
+                        // once the player has 50 gold so the
+                        // first-Farmhand cost is reachable. Workers
+                        // accrue resources passively while Estate is
+                        // the selected idle action (§5.6).
+                        {
+                            if inv.revealed_has(shared::RevealKey::Estate) {
+                                let estate_active = inv.idle_action == shared::IDLE_ACTION_ESTATE;
+                                let form_name_str = i18n_shared::form_name(locale, inv.current_form);
+                                let toggle_label = if estate_active { "Pause Estate" } else { "Run Estate" };
+                                html! {
+                                    <section class={classes!("panel", "estate", anim_cls(shared::RevealKey::Estate))}>
+                                        <h2>{ "Estate" }</h2>
+                                        <p class="muted small">
+                                            { format!("Workers produce while Estate is the active idle action. Active form: {}.", form_name_str) }
+                                        </p>
+                                        <div class="action-row">
+                                            <button onclick={on_toggle_estate.clone()}>
+                                                { toggle_label }
+                                            </button>
+                                        </div>
+                                        <table class="estate-grid">
+                                            <thead>
+                                                <tr>
+                                                    <th>{ "Tier" }</th>
+                                                    <th class="num">{ "Owned" }</th>
+                                                    <th class="num">{ "Yield/s" }</th>
+                                                    <th class="num">{ "Next price" }</th>
+                                                    <th>{ "" }</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                { for shared::ESTATE_TIERS.iter().map(|tier| {
+                                                    let owned = inv.estate.workers_of(tier.id);
+                                                    let next_price = shared::estate_next_price(tier, owned);
+                                                    let aff_bp = shared::form_affinity_bp(inv.current_form, tier.id);
+                                                    let res_label = match tier.produces {
+                                                        shared::EstateResource::Wheat => "wheat",
+                                                        shared::EstateResource::Gold => "gold",
+                                                        shared::EstateResource::Essence => "essence",
+                                                    };
+                                                    let effective_yield = tier
+                                                        .yield_per_sec
+                                                        .saturating_mul(owned)
+                                                        .saturating_mul(aff_bp)
+                                                        / 10_000;
+                                                    let aff_cls = if aff_bp > 10_000 { "aff-buff" }
+                                                        else if aff_bp < 10_000 { "aff-pen" }
+                                                        else { "aff-neutral" };
+                                                    let aff_pct = (aff_bp as i64 - 10_000) / 100;
+                                                    let aff_str = if aff_bp == 10_000 {
+                                                        String::from("")
+                                                    } else if aff_pct >= 0 {
+                                                        format!(" (+{}%)", aff_pct)
+                                                    } else {
+                                                        format!(" ({}%)", aff_pct)
+                                                    };
+                                                    let buy_disabled = inv.gold < next_price;
+                                                    let onbuy = mk_buy_worker_cb(tier.id);
+                                                    html! {
+                                                        <tr>
+                                                            <td>{ tier.name }</td>
+                                                            <td class="num">{ owned }</td>
+                                                            <td class="num">
+                                                                { format!("{} {}", effective_yield, res_label) }
+                                                                <span class={aff_cls}>{ aff_str }</span>
+                                                            </td>
+                                                            <td class="num">{ format_si(next_price) }{ " g" }</td>
+                                                            <td>
+                                                                <button onclick={onbuy} disabled={buy_disabled}>
+                                                                    { "Hire" }
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    }
+                                                }) }
+                                            </tbody>
+                                        </table>
                                     </section>
                                 }
                             } else {

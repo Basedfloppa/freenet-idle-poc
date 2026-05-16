@@ -101,14 +101,14 @@ fn app() -> Html {
                 new_guild_name_input: String::new(),
                 toasts: Vec::new(),
                 shown_achievements: None,
+                revealed_animated: None,
+                animate_reveal: 0,
                 // Wizard always opens at step 0 on cold load. The
-                // delegate's `LoadUiPrefs` reply (in
-                // `freenet::actions::settings::load_settings_once`)
-                // closes it for returning players a few hundred ms
-                // later. Cost: a brief flash of step 0 on reload for
-                // returning users. Benefit: new players always see
-                // the wizard regardless of sandbox-localStorage state.
+                // delegate's settings reply closes it for returning
+                // players a few hundred ms later.
                 onboarding_step: Some(0),
+                last_seen_version: None,
+                catchup_modal_dismissed: false,
             });
             // Apply the default theme for first paint; the delegate's
             // `LoadUiPrefs` reply re-applies the player's saved theme

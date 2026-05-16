@@ -437,7 +437,9 @@ h3 { font-size: 0.82em; color: var(--fg-muted); margin: 1em 0 0.4em; text-transf
 }
 
 /* Three-column grid: stats | combat scene | equipment.
-   Collapses to single column when too narrow. */
+   Collapses to single column when too narrow, or to two columns
+   when the equipment panel is hidden by the reveal-bitmask (a new
+   player without gear shouldn't see an empty third track). */
 .grid-3 {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr);
@@ -445,8 +447,31 @@ h3 { font-size: 0.82em; color: var(--fg-muted); margin: 1em 0 0.4em; text-transf
     margin: 0.8em 0;
 }
 .grid-3 .panel { margin: 0; }
+.grid-3:not(:has(.panel.equipment)) {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+}
 @media (max-width: 880px) {
-    .grid-3 { grid-template-columns: 1fr; }
+    .grid-3,
+    .grid-3:not(:has(.panel.equipment)) { grid-template-columns: 1fr; }
+}
+
+/* Reveal animation — applied only when the matching `RevealKey`
+   bit transitions from 0 → 1 during the live session. Render-side
+   gating (`Core::animate_reveal`, populated in `ingest_inventory`)
+   stamps `.reveal-anim` onto the freshly-revealed container for
+   exactly one delegate tick; subsequent tab switches see the bit
+   in `revealed_animated`, so the class is absent and the keyframe
+   never re-fires. Returning players land with `animate_reveal == 0`
+   and see no slide-in flash on cold load. */
+@keyframes reveal-in {
+    from { opacity: 0; transform: translateY(-12px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.panel.reveal-anim,
+.consumable-row.reveal-anim,
+.top-actions .icon-btn.reveal-anim,
+button.reveal-anim {
+    animation: reveal-in 0.4s ease-out;
 }
 
 /* Hero stats panel — ICSBAH-style stat grid. */
@@ -921,6 +946,26 @@ table.debug-grid td {
     margin-top: 1em;
 }
 
+/* Catchup modal (B4) — reuses the onboarding chrome, widens for
+   the multi-section layout (offline summary + estate + patchnotes)
+   and styles the per-section sub-headers as quiet dividers rather
+   than the full-weight onboarding h2. */
+.onboarding-modal.catchup-modal { max-width: 560px; }
+.onboarding-modal.catchup-modal section { margin: 0.8em 0; }
+.onboarding-modal.catchup-modal section h3 {
+    margin: 0 0 0.3em;
+    font-size: 0.95em;
+    color: var(--accent-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.onboarding-modal.catchup-modal ul {
+    margin: 0.3em 0 0;
+    padding-left: 1.2em;
+    line-height: 1.5;
+}
+.onboarding-modal.catchup-modal ul.catchup-estate { margin: 0.3em 0 0; }
+
 /* Transient unlock toasts — stacked in the top-right corner.
    Pointer-events: none so they never intercept clicks on the
    underlying UI; auto-fade is handled in Rust (unified tick
@@ -1330,6 +1375,30 @@ table.buy-grid tr.disabled-row button { cursor: not-allowed; }
 .panel.plot h2 { color: var(--hue-plot-heading); }
 .panel.plot .chapter-no { margin: 0 0 0.4em; font-style: italic; }
 .panel.plot p { margin: 0; line-height: 1.5; }
+
+/* Estate (B2). Worker grid styled like the stat grid; affinity
+   badges colour-code the active form's per-tier bonus. */
+.panel.estate { background: var(--hue-stash-bg, transparent); border-color: var(--border-soft); }
+.panel.estate table.estate-grid {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 0.4em;
+}
+.panel.estate .estate-grid th,
+.panel.estate .estate-grid td {
+    padding: 0.3em 0.4em;
+    border-bottom: 1px solid var(--border-soft);
+    vertical-align: middle;
+}
+.panel.estate .estate-grid th {
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+.panel.estate .estate-grid td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.panel.estate .aff-buff { color: var(--accent-good, #4caf50); margin-left: 0.25em; }
+.panel.estate .aff-pen { color: var(--accent-bad, #d94f4f); margin-left: 0.25em; }
+.panel.estate .aff-neutral { color: var(--text-muted); margin-left: 0.25em; }
 
 /* Shop. */
 .panel.shop { background: var(--hue-shop-bg); border-color: var(--hue-shop-border); }

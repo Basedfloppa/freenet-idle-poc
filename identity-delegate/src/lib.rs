@@ -142,6 +142,12 @@ impl DelegateInterface for IdentityDelegate {
                 Ok(()) => AppResponse::BlobSaved { kind },
                 Err(e) => AppResponse::Error(e),
             },
+            AppRequest::BuyEstateWorker { tier_id, now_ms } => {
+                map_inv(actions::buy_estate_worker(ctx, tier_id, now_ms))
+            }
+            AppRequest::SetIdleAction { action, now_ms } => {
+                map_inv(actions::set_idle_action(ctx, action, now_ms))
+            }
         };
 
         let out_envelope = DelegateEnvelopeOut {

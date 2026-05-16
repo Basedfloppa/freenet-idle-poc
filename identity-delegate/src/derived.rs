@@ -52,14 +52,14 @@ pub fn max_hp_of(inv: &Inventory) -> u64 {
 pub fn attack_of(inv: &Inventory) -> u64 {
     let lvl = level_of(inv);
     let (atk_bonus, _, _) = total_bonuses(inv);
-    5u64.saturating_add(lvl.saturating_mul(2))
+    2u64.saturating_add(lvl.saturating_mul(2))
         .saturating_add(atk_bonus)
 }
 
 pub fn defence_of(inv: &Inventory) -> u64 {
     let lvl = level_of(inv);
     let (_, def_bonus, _) = total_bonuses(inv);
-    5u64.saturating_add(lvl.saturating_mul(2))
+    2u64.saturating_add(lvl.saturating_mul(2))
         .saturating_add(def_bonus)
 }
 

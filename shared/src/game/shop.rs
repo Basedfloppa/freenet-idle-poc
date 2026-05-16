@@ -14,7 +14,7 @@ pub const GEAR_DROP_EVERY: u64 = 5;
 pub const POTION_DROP_EVERY: u64 = 13;
 pub const FIREBALL_DROP_EVERY: u64 = 19;
 
-pub const ENCOUNTERS_PER_MISSION: u32 = 5;
+pub const ENCOUNTERS_PER_MISSION: u32 = 3;
 
 // Shop
 pub const POTION_PRICE: u64 = 50;
