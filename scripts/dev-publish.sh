@@ -11,17 +11,31 @@
 # picks the file up, the watcher triggers a hot-reload of the tab.
 #
 # Env overrides:
-#   FDEV  — path to the fdev binary (default: locally-built debug)
+#   FDEV  — path to the fdev binary. Default: prefer freenet-core's
+#           target/release/fdev, fall back to target/debug/fdev.
+#           NOT $PATH/fdev — the system one is 0.3.151 and lacks the
+#           subcommands we depend on.
 #   WS    — ws URL of the local node (default: ws://127.0.0.1:7509)
 
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FDEV="${FDEV:-$HERE/../freenet-core/target/debug/fdev}"
 
-if [[ ! -x "$FDEV" ]]; then
-    echo "[dev-publish] fdev not found at: $FDEV"
-    echo "[dev-publish] build it first: cd $HERE/../freenet-core && cargo build --bin fdev"
+if [[ -z "${FDEV:-}" ]]; then
+    for cand in \
+        "$HERE/../freenet-core/target/release/fdev" \
+        "$HERE/../freenet-core/target/debug/fdev"; do
+        if [[ -x "$cand" ]]; then
+            FDEV="$cand"
+            break
+        fi
+    done
+fi
+
+if [[ -z "${FDEV:-}" || ! -x "$FDEV" ]]; then
+    echo "[dev-publish] fdev not found. Build first:"
+    echo "    cd $HERE/../freenet-core && cargo build --release --bin fdev"
+    echo "[dev-publish] or set FDEV=/path/to/fdev"
     exit 1
 fi
 

@@ -13,7 +13,10 @@
 #      invalidation` memory).
 #
 # Required env / defaults:
-#   FDEV               default: ../freenet-core/target/debug/fdev
+#   FDEV               default: ../freenet-core/target/release/fdev, then
+#                      target/debug/fdev. NOT $PATH/fdev — the system one
+#                      is 0.3.151 and silently produces broken tarballs.
+#                      Must support `website` subcommand (fdev ≥ 0.3.218).
 #   NODE_URL           full ws URL (overrides NODE_ADDRESS+NODE_PORT)
 #   NODE_ADDRESS       default 127.0.0.1
 #   NODE_PORT          default 7509
@@ -34,15 +37,43 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FDEV="${FDEV:-$HERE/../freenet-core/target/debug/fdev}"
 WEBSITE_KEY="${WEBSITE_KEY:-idle-poc}"
 SSH_HOST="${SSH_HOST:-orange}"
 WEBAPP_CACHE_DIR="${WEBAPP_CACHE_DIR:-/root/.cache/freenet/webapp_cache}"
 
-if [[ ! -x "$FDEV" ]]; then
-    echo "[prod-update] fdev not found at: $FDEV"
+# Resolve fdev — explicit FDEV wins, else prefer release over debug
+# (release is what we actually build for prod). The `$PATH` fdev is
+# NOT used as a fallback: PATH-fdev on this machine is 0.3.151 which
+# silently lacks the `website` subcommand and would either error out
+# or — worse — produce a partial tarball that landed the node in an
+# unrecoverable state during the 2026-05-16 publish.
+if [[ -z "${FDEV:-}" ]]; then
+    for cand in \
+        "$HERE/../freenet-core/target/release/fdev" \
+        "$HERE/../freenet-core/target/debug/fdev"; do
+        if [[ -x "$cand" ]]; then
+            FDEV="$cand"
+            break
+        fi
+    done
+fi
+
+if [[ -z "${FDEV:-}" || ! -x "$FDEV" ]]; then
+    echo "[prod-update] fdev not found. Build first:"
+    echo "    cd $HERE/../freenet-core && cargo build --release --bin fdev"
+    echo "[prod-update] or set FDEV=/path/to/fdev (must support 'website' subcommand)."
     exit 1
 fi
+
+# Verify the chosen binary supports `website update` — catches the
+# accidental PATH-fdev / older-release situation before we ship a
+# malformed tarball.
+if ! "$FDEV" website --help >/dev/null 2>&1; then
+    echo "[prod-update] $FDEV does not support 'website' subcommand."
+    echo "[prod-update] need fdev ≥ 0.3.218. Got: $("$FDEV" --version 2>&1 | head -1)"
+    exit 1
+fi
+echo "[prod-update] using fdev: $FDEV ($("$FDEV" --version 2>&1 | head -1))"
 
 if [[ -z "${WEBAPP_ID:-}" ]]; then
     if [[ -f "$HERE/frontend/prod-webapp-id.txt" ]]; then
@@ -73,32 +104,54 @@ trunk build --release
 
 echo
 echo "[prod-update] fdev website update"
-# No `network` MODE positional: fdev accepts only `local` / `network`
-# and our target (orange) is a network gateway, but its PUT path is
-# the same regardless of fdev's client-side MODE. The `--address` /
-# `--port` flags supply the connection target; MODE only gates the
-# `--release` flag which itself is gated by an `anyhow::bail!` in
-# `commands.rs:60` ("Cannot publish contracts in the network yet").
+# fdev's `--address`/`--port` resolve the connection target. There is
+# no `local`/`network` positional here — the PUT path is the same
+# regardless. Capture stdout+stderr so we can disambiguate a real
+# failure from the retry-race below.
+PUB_LOG="$(mktemp)"
+PUB_EXIT=0
 "$FDEV" "${NODE_ARGS[@]}" website update \
-    --key "$WEBSITE_KEY" "$HERE/frontend/dist"
+    --key "$WEBSITE_KEY" "$HERE/frontend/dist" 2>&1 | tee "$PUB_LOG" \
+    || PUB_EXIT=$?
+
+# Detect the known retry-race: the first PUT actually lands in the
+# node's DB, but the notification channel closes before fdev receives
+# the ack, so fdev retries. The retries are rejected with
+#   "New state version <N> must be higher than current version <N>"
+# where both numbers match the just-uploaded version — i.e. our state
+# IS already there. Treat that as success.
+if [[ "$PUB_EXIT" -ne 0 ]]; then
+    if grep -qE 'New state version ([0-9]+) must be higher than current version \1' "$PUB_LOG"; then
+        echo "[prod-update] fdev returned $PUB_EXIT, but the state is already in DB"
+        echo "[prod-update] (retry-race: first PUT landed, notification channel closed)."
+        echo "[prod-update] proceeding with cache invalidation."
+    else
+        echo "[prod-update] fdev failed (exit $PUB_EXIT). See $PUB_LOG"
+        exit "$PUB_EXIT"
+    fi
+fi
 
 if [[ -n "$SSH_HOST" ]]; then
     echo
     echo "[prod-update] clearing unpacked webapp cache on $SSH_HOST"
-    # Guard against accidentally wiping the whole cache dir if
-    # WEBAPP_ID is somehow empty — earlier check should have caught
-    # it, but defence-in-depth is cheap.
     if [[ -z "$WEBAPP_ID" ]]; then
         echo "[prod-update] refusing to ssh: WEBAPP_ID empty"
         exit 1
     fi
-    ssh "$SSH_HOST" "rm -rf '${WEBAPP_CACHE_DIR}/${WEBAPP_ID}/'"
-    echo "[prod-update] cache cleared: ${WEBAPP_CACHE_DIR}/${WEBAPP_ID}/"
+    # Clear BOTH the unpacked directory AND the sibling `.hash`
+    # sentinel. Leaving the hash file behind makes the next GET return
+    # HTTP 500 ("Contract not cached yet") instead of triggering a
+    # fresh unpack — see memory `webapp-cache-invalidation`.
+    ssh "$SSH_HOST" "rm -rf '${WEBAPP_CACHE_DIR}/${WEBAPP_ID}/' '${WEBAPP_CACHE_DIR}/${WEBAPP_ID}.hash'"
+    echo "[prod-update] cache cleared: ${WEBAPP_CACHE_DIR}/${WEBAPP_ID}/ (+ .hash)"
+    # Warm the cache with one outer GET so subsequent users don't
+    # race the unpack step.
+    ssh "$SSH_HOST" "curl -s -o /dev/null -w 'warm GET status=%{http_code}\n' http://127.0.0.1:7509/v1/contract/web/${WEBAPP_ID}/"
 else
     echo
     echo "[prod-update] SSH_HOST empty — skipping webapp cache rm."
     echo "[prod-update] if you see the old version, clear it manually:"
-    echo "    ssh <node> 'rm -rf ${WEBAPP_CACHE_DIR}/${WEBAPP_ID}/'"
+    echo "    ssh <node> \"rm -rf ${WEBAPP_CACHE_DIR}/${WEBAPP_ID}/ ${WEBAPP_CACHE_DIR}/${WEBAPP_ID}.hash\""
 fi
 
 echo

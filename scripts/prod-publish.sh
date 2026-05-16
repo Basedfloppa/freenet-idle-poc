@@ -16,7 +16,10 @@
 # the heavy contract publish and only bumps the website version.
 #
 # Required env / defaults:
-#   FDEV             default: ../freenet-core/target/debug/fdev (must be ≥0.3.218)
+#   FDEV             default: ../freenet-core/target/release/fdev, then
+#                    target/debug/fdev. NOT $PATH/fdev — the system one
+#                    is 0.3.151 and produces broken tarballs. Must
+#                    support `website` subcommand (fdev ≥ 0.3.218).
 #   NODE_URL         full ws URL of the prod node (overrides NODE_ADDRESS+NODE_PORT)
 #                    typical SSH-tunnel form: ws://127.0.0.1:17509
 #   NODE_ADDRESS     default 127.0.0.1   (used when NODE_URL is unset)
@@ -51,17 +54,38 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FDEV="${FDEV:-$HERE/../freenet-core/target/debug/fdev}"
 WEBSITE_KEY="${WEBSITE_KEY:-idle-poc}"
 PATCH_KEYS="${PATCH_KEYS:-1}"
 STAGE_WEBAPP="${STAGE_WEBAPP:-1}"
 FORCE_REPUBLISH="${FORCE_REPUBLISH:-0}"
 
-if [[ ! -x "$FDEV" ]]; then
-    echo "[prod-publish] fdev not found at: $FDEV"
-    echo "[prod-publish] build it first: cd $HERE/../freenet-core && cargo build --bin fdev"
+# Resolve fdev — explicit FDEV wins, else prefer release over debug.
+# $PATH is NOT consulted: the system fdev on this machine is 0.3.151
+# and silently produces broken webapp tarballs.
+if [[ -z "${FDEV:-}" ]]; then
+    for cand in \
+        "$HERE/../freenet-core/target/release/fdev" \
+        "$HERE/../freenet-core/target/debug/fdev"; do
+        if [[ -x "$cand" ]]; then
+            FDEV="$cand"
+            break
+        fi
+    done
+fi
+
+if [[ -z "${FDEV:-}" || ! -x "$FDEV" ]]; then
+    echo "[prod-publish] fdev not found. Build first:"
+    echo "    cd $HERE/../freenet-core && cargo build --release --bin fdev"
+    echo "[prod-publish] or set FDEV=/path/to/fdev (must support 'website' subcommand)."
     exit 1
 fi
+
+if ! "$FDEV" website --help >/dev/null 2>&1; then
+    echo "[prod-publish] $FDEV does not support 'website' subcommand."
+    echo "[prod-publish] need fdev ≥ 0.3.218. Got: $("$FDEV" --version 2>&1 | head -1)"
+    exit 1
+fi
+echo "[prod-publish] using fdev: $FDEV ($("$FDEV" --version 2>&1 | head -1))"
 
 # Resolve node connection flags once. fdev accepts either --node-url
 # (full ws URL) or --address+--port (host pair). Stored as an array so
@@ -298,8 +322,21 @@ fi
 ###############################################################################
 echo "[prod-publish] publishing webapp via fdev website publish"
 WEBSITE_PUB_LOG="$(mktemp)"
+WEBSITE_PUB_EXIT=0
 "$FDEV" "${NODE_ARGS[@]}" website publish \
-    --key "$WEBSITE_KEY" "$HERE/frontend/dist" 2>&1 | tee "$WEBSITE_PUB_LOG"
+    --key "$WEBSITE_KEY" "$HERE/frontend/dist" 2>&1 | tee "$WEBSITE_PUB_LOG" \
+    || WEBSITE_PUB_EXIT=$?
+
+# Same retry-race as in prod-update-webapp.sh — see note there.
+if [[ "$WEBSITE_PUB_EXIT" -ne 0 ]]; then
+    if grep -qE 'New state version ([0-9]+) must be higher than current version \1' "$WEBSITE_PUB_LOG"; then
+        echo "[prod-publish] fdev returned $WEBSITE_PUB_EXIT — retry-race (state is in DB)"
+    else
+        echo "[prod-publish] fdev website publish failed (exit $WEBSITE_PUB_EXIT)"
+        echo "[prod-publish] full log: $WEBSITE_PUB_LOG"
+        exit "$WEBSITE_PUB_EXIT"
+    fi
+fi
 
 # Capture the webapp contract id. Patterns in priority order:
 #   "Publishing website as contract <id> (version <n>)" — current fdev

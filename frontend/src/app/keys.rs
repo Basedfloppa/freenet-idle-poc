@@ -14,20 +14,20 @@ use web_sys::Response;
 // puts cleanly; once the fdev release with #4075 lands, anyone
 // republishing from a fresh checkout will get the same ids back
 // (they're deterministic from the WASM hash).
-pub const CONTRACT_ID_B58: &str = "DW6vbKtz6THYMzYd1nyNJHtrDP5Hm6RFBmBFQsqLyBCU";
-pub const CODE_HASH_B58: &str = "3uf35pYiL8UdXvCs4S2H95gdZ8u5SXALUWousbwiqqFk";
+pub const CONTRACT_ID_B58: &str = "4G2SaiknfKMojuzc2xb78h4jXg6U9LTEbQUMT4AanPPe";
+pub const CODE_HASH_B58: &str = "BMDLQXVUR7VtTw9JcqS6gZVd1cGkKU4p56Vtxn9Vj1ta";
 
-pub const DELEGATE_KEY_B58: &str = "q2dDTugwnDVJsCUr6BkedymEYDPr4wrJg7yGVrQ4qrY";
-pub const DELEGATE_CODE_HASH_B58: &str = "3hetpws1JsFDNS5vUfuA8AYNs2Q2fMYTxor5fyhjZ7em";
+pub const DELEGATE_KEY_B58: &str = "FvCSLNevJeg7BXppzehg2XTZ3kycpghx2nhZMoHmSrFN";
+pub const DELEGATE_CODE_HASH_B58: &str = "3DcA6pvRud3AVPguwt8q8woFAZinwsmptBAejHjJrAsq";
 
 /// Mailbox contract — payload-agnostic player-to-player message
 /// bus. Subscribed on connect like the presence contract.
-pub const MAILBOX_CONTRACT_ID_B58: &str = "HhM5RF8fBYeb74qgHy4NYbrP1Dn2FP8WoJRsnjoDnfFp";
-pub const MAILBOX_CODE_HASH_B58: &str = "4v1GAyDKHfvo1W5eZmEzceiKDC5ZcbSr4MHHPebQE2BS";
+pub const MAILBOX_CONTRACT_ID_B58: &str = "3rNxmZTJmYVn5vrtu6GkuKspTjSpL5636f2gmdtWVZit";
+pub const MAILBOX_CODE_HASH_B58: &str = "4c2znr6EG2pbT6PZXXrcwXirPHpB9LWzrPsiUVytzFfC";
 
 /// Guilds contract — cooperative group registry.
-pub const GUILDS_CONTRACT_ID_B58: &str = "QYbkKTefFY4XESNT63AAD1wLyQVNQEsd2RZoXVRy5ri";
-pub const GUILDS_CODE_HASH_B58: &str = "4t5NY7Tpj7vyrz7upDuL8T69Y1km2J8akMrP9nT5Y6og";
+pub const GUILDS_CONTRACT_ID_B58: &str = "59F9ZiwZJ2eGEPvgBpChM2dMDRqnDZWxcCk38Mm2FfS7";
+pub const GUILDS_CODE_HASH_B58: &str = "5dp43FWKcCpsbQpoDGJr7QYezhSnD428LFp1JYc9MaE7";
 
 /// Runtime overrides served as `./dev-keys.json` next to index.html.
 /// `scripts/dev-publish.sh` rewrites this file on every (re-)publish
