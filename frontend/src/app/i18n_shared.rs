@@ -284,57 +284,50 @@ pub fn gear_name(locale: Locale, t: &GearTemplate) -> String {
 /// beyond the table.
 pub fn chapter(locale: Locale, inv: &Inventory) -> (u8, String, String) {
     let area_id = inv.current_area;
-    match (locale.fmt_locale(), area_id) {
-        (Locale::En, 0) => (
-            1,
-            "Chapter 1 · The Village Fields".into(),
-            if inv.mission_count == 0 {
-                "Your father points east. \"Be strong, and bring the boss down.\" The fields outside the village are quiet — for now. Run a mission to begin.".into()
-            } else {
-                "You're running errands at the edge of the fields. Each mission trickles gold and essence into the lockbox the delegate keeps for you on the node.".into()
-            },
-        ),
-        (Locale::Ru, 0) => (
-            1,
-            "Глава 1 · Деревенские поля".into(),
-            if inv.mission_count == 0 {
-                "Отец указывает на восток. «Будь сильным и одолей босса». Поля за деревней пока тихи — запусти миссию, чтобы начать.".into()
-            } else {
-                "Ты разбираешь мелочи на краю полей. Каждая миссия по чуть-чуть капает золотом и эссенцией в сейф, который делегат держит на узле.".into()
-            },
-        ),
-        (Locale::En, 1) => (
-            2,
-            "Chapter 2 · The Forest Road".into(),
+    let area = shared::area_of(area_id);
+    let name_l = area_name(locale, area);
+    // Chapter number tracks the area-id so newly-added branches
+    // (C3a: Deep Forest, Snowfields, …) get their own number
+    // instead of all falling through to "Chapter 4 · Boss's Lair".
+    // Display the area's own localised name in the title so the
+    // header above the battle window updates the moment the
+    // player switches zones.
+    let chap_no = area_id.saturating_add(1);
+    let title = match locale.fmt_locale() {
+        Locale::En => format!("Chapter {chap_no} · {name_l}"),
+        Locale::Ru => format!("Глава {chap_no} · {name_l}"),
+        Locale::De => unreachable!("fmt_locale normalises De"),
+    };
+    // Curated lore strings for the original four zones; new branch
+    // areas fall back to the AreaDef blurb so the body never
+    // mismatches the title.
+    let body: String = match (locale.fmt_locale(), area_id) {
+        (Locale::En, 0) if inv.mission_count == 0 =>
+            "Your father points east. \"Be strong, and bring the boss down.\" The fields outside the village are quiet — for now. Run a mission to begin.".into(),
+        (Locale::En, 0) =>
+            "You're running errands at the edge of the fields. Each mission trickles gold and essence into the lockbox the delegate keeps for you on the node.".into(),
+        (Locale::Ru, 0) if inv.mission_count == 0 =>
+            "Отец указывает на восток. «Будь сильным и одолей босса». Поля за деревней пока тихи — запусти миссию, чтобы начать.".into(),
+        (Locale::Ru, 0) =>
+            "Ты разбираешь мелочи на краю полей. Каждая миссия по чуть-чуть капает золотом и эссенцией в сейф, который делегат держит на узле.".into(),
+        (Locale::En, 1) =>
             "Word of your exploits has reached the next biome. The forest paths yield more essence, but the World Boss begins to stir as every player chips at its HP.".into(),
-        ),
-        (Locale::Ru, 1) => (
-            2,
-            "Глава 2 · Лесная дорога".into(),
+        (Locale::Ru, 1) =>
             "Слухи о твоих подвигах добрались до следующего биома. Лесные тропы дают больше эссенции, но Мировой Босс начинает шевелиться, пока каждый игрок откусывает кусочки от его ОЗ.".into(),
-        ),
-        (Locale::En, 2) => (
-            3,
-            "Chapter 3 · The Mountain Pass".into(),
+        (Locale::En, 2) =>
             "Merchants pay handsomely at the pass, and the loot scales. Other adventurers across the network are converging on the same foe — every hit is mirrored in the global HP gauge.".into(),
-        ),
-        (Locale::Ru, 2) => (
-            3,
-            "Глава 3 · Горный перевал".into(),
+        (Locale::Ru, 2) =>
             "Купцы на перевале платят щедро, и добыча масштабируется. Другие искатели приключений по всей сети сходятся к одному и тому же врагу — каждый удар отражается в общей шкале ОЗ.".into(),
-        ),
-        (Locale::En, _) => (
-            4,
-            "Chapter 4 · The Boss's Lair".into(),
+        (Locale::En, 3) =>
             "You've reached the inner sanctum. Damage-heavy work — every blow you land is mirrored in the World Boss HP gauge that every connected player sees in real time.".into(),
-        ),
-        (Locale::Ru, _) => (
-            4,
-            "Глава 4 · Логово Босса".into(),
+        (Locale::Ru, 3) =>
             "Ты добрался до внутреннего святилища. Тяжёлая работа по урону — каждый твой удар отражается в шкале ОЗ Мирового Босса, которую каждый подключённый игрок видит в реальном времени.".into(),
-        ),
-        (Locale::De, _) => unreachable!("fmt_locale normalises De"),
-    }
+        // Branch areas (4 Deep Forest, 5 Snowfields, …) and any
+        // future addition: fall back to the area blurb. Cheap and
+        // always-accurate.
+        _ => area_blurb(locale, area).to_string(),
+    };
+    (chap_no, title, body)
 }
 
 /// Plot word-list expansion — six-slot Mad Libs source. Returns the

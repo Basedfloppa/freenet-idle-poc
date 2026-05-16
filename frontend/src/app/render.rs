@@ -359,6 +359,28 @@ pub fn render_core(
     let on_buy_potion = mk_buy_cb(CONSUMABLE_POTION);
     let on_buy_fireball = mk_buy_cb(CONSUMABLE_FIREBALL);
 
+    // Buy-form callback factory (one closure per form id). Used by
+    // the shop's Forms panel — cheap Human reset + expensive
+    // direct-form purchases.
+    let mk_buy_form_cb = {
+        let core = core_cell.clone();
+        let pending = pending.clone();
+        let bump = bump.clone();
+        move |form: u8| {
+            let core = core.clone();
+            let pending = pending.clone();
+            let bump = bump.clone();
+            Callback::from(move |_| {
+                crate::freenet::actions::shop::buy_form_once(
+                    core.clone(),
+                    pending.clone(),
+                    bump.clone(),
+                    form,
+                )
+            })
+        }
+    };
+
     let on_auto_equip = {
         let core = core_cell.clone();
         let pending = pending.clone();
@@ -911,7 +933,14 @@ pub fn render_core(
     } else {
         locale.tr(MessageId::BtnAutoOff)
     };
-    let mission_disabled = my.is_none() || c.mission_in_flight;
+    // Estate is mutually exclusive with combat (§5.6). Disable the
+    // Run Mission button while Estate is the active idle action —
+    // delegate would reject the RPC anyway, but the visual gate is
+    // clearer than a flashing error.
+    let estate_blocking_combat =
+        c.inventory.idle_action == shared::IDLE_ACTION_ESTATE;
+    let mission_disabled =
+        my.is_none() || c.mission_in_flight || estate_blocking_combat;
 
     let inv = &c.inventory;
     // Reveal-bit slide-in animation is gated to the keys that just
@@ -947,6 +976,60 @@ pub fn render_core(
         locale.tr(MessageId::TipAutoEquipBest).to_string()
     } else {
         locale.tr(MessageId::TipAutoEquipNothing).to_string()
+    };
+
+    // World-map graph layout (C3a). Compute each area's depth =
+    // longest path from a starter (predecessors-empty area). Group
+    // by depth → columns; render each column vertically with edge
+    // hints between adjacent columns. AREAS is small (6 today)
+    // so a fixed-point loop is cheaper than topological-sort
+    // ceremony. The grouping is read inside `html!` below.
+    let area_depths: std::collections::BTreeMap<u8, u8> = {
+        let mut depths: std::collections::BTreeMap<u8, u8> =
+            std::collections::BTreeMap::new();
+        // Seed starters at depth 0.
+        for area in AREAS {
+            if area.predecessors.is_empty() {
+                depths.insert(area.id, 0);
+            }
+        }
+        // Relax until convergence — small graph, cheap.
+        let mut changed = true;
+        let mut guard = 0usize;
+        while changed && guard < 32 {
+            changed = false;
+            for area in AREAS {
+                if area.predecessors.is_empty() {
+                    continue;
+                }
+                let max_pred = area
+                    .predecessors
+                    .iter()
+                    .filter_map(|p| depths.get(p).copied())
+                    .max();
+                if let Some(d) = max_pred {
+                    let new_d = d + 1;
+                    let entry = depths.entry(area.id).or_insert(new_d);
+                    if *entry != new_d {
+                        *entry = new_d;
+                        changed = true;
+                    } else if depths.get(&area.id).copied().unwrap_or(0) != new_d {
+                        changed = true;
+                    }
+                }
+            }
+            guard += 1;
+        }
+        depths
+    };
+    let area_columns: std::collections::BTreeMap<u8, Vec<&shared::AreaDef>> = {
+        let mut by_depth: std::collections::BTreeMap<u8, Vec<&shared::AreaDef>> =
+            std::collections::BTreeMap::new();
+        for area in AREAS {
+            let d = area_depths.get(&area.id).copied().unwrap_or(0);
+            by_depth.entry(d).or_default().push(area);
+        }
+        by_depth
     };
     let (xp_cur, xp_req) = xp_in_level(inv);
     let xp_pct = if xp_req == 0 { 100 } else { (xp_cur * 100 / xp_req).min(100) };
@@ -1146,6 +1229,8 @@ pub fn render_core(
                                             title={
                                                 if inv.current_battle.is_some() {
                                                     locale.tr(MessageId::TipFightInProgress)
+                                                } else if estate_blocking_combat {
+                                                    locale.tr(MessageId::TipEstateBlocksCombat)
                                                 } else { "" }
                                             }>
                                         { locale.tr(MessageId::BtnRunMission) }
@@ -1246,45 +1331,62 @@ pub fn render_core(
                                                 }
                                             }
                                             {
-                                                if inv.revealed_has(shared::RevealKey::Consumables) {
+                                                // Consumables: only render rows the player actually
+                                                // owns. Reveal-bit latches the section on first
+                                                // pickup; per-item gates hide stale lines after a
+                                                // consume so "0 fireballs" doesn't squat in the
+                                                // panel.
+                                                if inv.revealed_has(shared::RevealKey::Consumables)
+                                                    && (inv.potions > 0 || inv.fireballs > 0)
+                                                {
                                                     html! {
                                                         <>
                                                             <h3>{ locale.tr(MessageId::PanelConsumables) }</h3>
                                                             <div class={classes!("consumable-row", anim_cls(shared::RevealKey::Consumables))}>
-                                                                <span class="consumable">
-                                                                    <span class="name">{ locale.tr(MessageId::ItemPotion) }</span>
-                                                                    <span class="qty">{ inv.potions }</span>
-                                                                    <button
-                                                                        onclick={on_use_potion}
-                                                                        disabled={inv.potions == 0}
-                                                                        title={
-                                                                            if inv.current_battle.is_some() {
-                                                                                locale.tr(MessageId::TipPotionQueue)
-                                                                            } else {
-                                                                                locale.tr(MessageId::TipPotionIdle)
-                                                                            }
+                                                                {
+                                                                    if inv.potions > 0 {
+                                                                        html! {
+                                                                            <span class="consumable">
+                                                                                <span class="name">{ locale.tr(MessageId::ItemPotion) }</span>
+                                                                                <span class="qty">{ inv.potions }</span>
+                                                                                <button
+                                                                                    onclick={on_use_potion}
+                                                                                    title={
+                                                                                        if inv.current_battle.is_some() {
+                                                                                            locale.tr(MessageId::TipPotionQueue)
+                                                                                        } else {
+                                                                                            locale.tr(MessageId::TipPotionIdle)
+                                                                                        }
+                                                                                    }
+                                                                                >
+                                                                                    { locale.tr(MessageId::BtnUse) }
+                                                                                </button>
+                                                                            </span>
                                                                         }
-                                                                    >
-                                                                        { locale.tr(MessageId::BtnUse) }
-                                                                    </button>
-                                                                </span>
-                                                                <span class="consumable">
-                                                                    <span class="name">{ locale.tr(MessageId::ItemFireball) }</span>
-                                                                    <span class="qty">{ inv.fireballs }</span>
-                                                                    <button
-                                                                        onclick={on_use_fireball}
-                                                                        disabled={inv.fireballs == 0}
-                                                                        title={
-                                                                            if inv.current_battle.is_some() {
-                                                                                locale.tr(MessageId::TipFireballQueue).to_string()
-                                                                            } else {
-                                                                                locale.fmt_fireball_idle(FIREBALL_BOSS_DAMAGE)
-                                                                            }
+                                                                    } else { html! {} }
+                                                                }
+                                                                {
+                                                                    if inv.fireballs > 0 {
+                                                                        html! {
+                                                                            <span class="consumable">
+                                                                                <span class="name">{ locale.tr(MessageId::ItemFireball) }</span>
+                                                                                <span class="qty">{ inv.fireballs }</span>
+                                                                                <button
+                                                                                    onclick={on_use_fireball}
+                                                                                    title={
+                                                                                        if inv.current_battle.is_some() {
+                                                                                            locale.tr(MessageId::TipFireballQueue).to_string()
+                                                                                        } else {
+                                                                                            locale.fmt_fireball_idle(FIREBALL_BOSS_DAMAGE)
+                                                                                        }
+                                                                                    }
+                                                                                >
+                                                                                    { locale.tr(MessageId::BtnUse) }
+                                                                                </button>
+                                                                            </span>
                                                                         }
-                                                                    >
-                                                                        { locale.tr(MessageId::BtnUse) }
-                                                                    </button>
-                                                                </span>
+                                                                    } else { html! {} }
+                                                                }
                                                             </div>
                                                         </>
                                                     }
@@ -1435,8 +1537,47 @@ pub fn render_core(
                             <p class="muted small">
                                 { locale.fmt_currently_farming(i18n_shared::area_name(locale, area), lvl) }
                             </p>
-                            <div class="area-grid">
-                                { for AREAS.iter().map(|a| render_area_card(locale, a, inv.current_area, lvl, inv, &mk_set_area_cb)) }
+                            // Graph view (C3a): one column per
+                            // depth from a starter, cards stacked
+                            // vertically within. Edges between
+                            // adjacent columns are drawn as a CSS
+                            // `↳` chevron stamp on each non-starter
+                            // card — simpler than SVG line plumbing
+                            // and still reads as "Forest → Deep
+                            // Forest / Mountain Pass". The flat
+                            // list rendering is gone; on mobile the
+                            // columns collapse to rows via the
+                            // matching @media block in style.css.
+                            <div class="area-graph">
+                                { for area_columns.iter().map(|(depth, cols)| html! {
+                                    <div class={classes!("graph-col", format!("depth-{}", depth))}>
+                                        { for cols.iter().map(|a| html! {
+                                            <div class="graph-node">
+                                                { render_area_card(locale, a, inv.current_area, lvl, inv, &mk_set_area_cb) }
+                                                {
+                                                    if a.predecessors.is_empty() {
+                                                        html! {}
+                                                    } else {
+                                                        // Show the upstream area names so the
+                                                        // player sees the graph connectivity at
+                                                        // a glance. Names are localised via
+                                                        // `i18n_shared::area_name`.
+                                                        let upstream: Vec<String> = a.predecessors
+                                                            .iter()
+                                                            .filter_map(|pid| shared::AREAS.iter().find(|x| x.id == *pid))
+                                                            .map(|p| i18n_shared::area_name(locale, p).to_string())
+                                                            .collect();
+                                                        html! {
+                                                            <p class="graph-edge-hint muted small">
+                                                                { format!("↳ {}", upstream.join(" / ")) }
+                                                            </p>
+                                                        }
+                                                    }
+                                                }
+                                            </div>
+                                        }) }
+                                    </div>
+                                }) }
                             </div>
                         </section>
                         <section class="panel plot">
@@ -1484,6 +1625,68 @@ pub fn render_core(
                                 </div>
                             </div>
                         </section>
+
+                        // Forms shop: panic-reset to Human + the
+                        // four expensive direct-form purchases. Each
+                        // row shows the form sprite, name, the stat
+                        // bundle as the description so the player
+                        // knows what they're buying, and a price
+                        // button gated by `form_buy_price` and
+                        // current gold.
+                        <section class="panel shop forms-shop">
+                            <h2>{ locale.tr(MessageId::PanelFormsShop) }</h2>
+                            <p class="muted small">
+                                { locale.tr(MessageId::FormsShopDesc) }
+                            </p>
+                            <div class="shop-items">
+                                { for [
+                                    shared::FORM_HUMAN,
+                                    shared::FORM_SLIME,
+                                    shared::FORM_CAT,
+                                    shared::FORM_HORSE,
+                                    shared::FORM_DRAGON,
+                                ].iter().filter_map(|form| {
+                                    let price = match shared::form_buy_price(*form) {
+                                        Some(p) => p,
+                                        None => return None,
+                                    };
+                                    let is_current = inv.current_form == *form;
+                                    let (atk, def, hp) = shared::form_base_bonuses(*form);
+                                    let (speed, eva) = shared::form_speed_evasion(*form);
+                                    let mut parts: Vec<String> = Vec::new();
+                                    if atk > 0 { parts.push(format!("+{atk} atk")); }
+                                    if def > 0 { parts.push(format!("+{def} def")); }
+                                    if hp > 0 { parts.push(format!("+{hp} hp")); }
+                                    if speed != 100 { parts.push(format!("speed {speed}")); }
+                                    if eva > 0 { parts.push(format!("+{eva}% eva")); }
+                                    let stat_desc = if parts.is_empty() {
+                                        locale.tr(MessageId::FormsShopBaselineDesc).to_string()
+                                    } else {
+                                        parts.join(" · ")
+                                    };
+                                    let cb = mk_buy_form_cb(*form);
+                                    let disabled = is_current || inv.gold < price;
+                                    Some(html! {
+                                        <div class="shop-item">
+                                            <span class="name">
+                                                { format!("{} {}",
+                                                    shared::form_sprite(*form),
+                                                    i18n_shared::form_name(locale, *form))
+                                                }
+                                            </span>
+                                            <span class="desc muted">{ stat_desc }</span>
+                                            <button onclick={cb} disabled={disabled}
+                                                    title={if is_current {
+                                                        locale.tr(MessageId::TipFormAlreadyActive)
+                                                    } else { "" }}>
+                                                { locale.fmt_buy_gold(price) }
+                                            </button>
+                                        </div>
+                                    })
+                                }) }
+                            </div>
+                        </section>
+
                         <section class="panel stash">
                             <h2>{ locale.fmt_stash_header(inv.unequipped.len()) }</h2>
                             <p class="muted small">
@@ -1588,8 +1791,30 @@ pub fn render_core(
                                 <tbody>
                                     <tr><th>{ locale.tr(MessageId::ResGold) }</th><td class="num">{ format_si(inv.gold) }</td></tr>
                                     <tr><th>{ locale.tr(MessageId::ResEssence) }</th><td class="num">{ format_si(inv.essence) }</td></tr>
-                                    <tr><th>{ locale.tr(MessageId::ResPotions) }</th><td class="num">{ inv.potions }</td></tr>
-                                    <tr><th>{ locale.tr(MessageId::ResFireballs) }</th><td class="num">{ inv.fireballs }</td></tr>
+                                    {
+                                        // Hide stash-style inventory rows when empty so the
+                                        // table doesn't carry "0 fireballs" forever after a
+                                        // consume. Gold/essence stay visible — they're
+                                        // progress counters, not pickup-style items.
+                                        if inv.potions > 0 {
+                                            html! {
+                                                <tr>
+                                                    <th>{ locale.tr(MessageId::ResPotions) }</th>
+                                                    <td class="num">{ inv.potions }</td>
+                                                </tr>
+                                            }
+                                        } else { html! {} }
+                                    }
+                                    {
+                                        if inv.fireballs > 0 {
+                                            html! {
+                                                <tr>
+                                                    <th>{ locale.tr(MessageId::ResFireballs) }</th>
+                                                    <td class="num">{ inv.fireballs }</td>
+                                                </tr>
+                                            }
+                                        } else { html! {} }
+                                    }
                                 </tbody>
                             </table>
                         </section>

@@ -89,3 +89,37 @@ pub fn buy_skill(
     save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }
+
+/// Buy a form change from the shop. `FORM_HUMAN` is the cheap
+/// "panic reset" path used when a defeat-induced form change
+/// leaves the player in something they didn't want; the other
+/// four are a strategic stat / equip-mask commitment and cost
+/// much more (see `form_buy_price`).
+///
+/// Side effects mirror the defeat-induced form-change path:
+///  * heal to the new form's max HP so the player doesn't end
+///    up with a sliver bar in a higher-HP form,
+///  * stamp the form into `forms_visited` (idempotent), which is
+///    the same set the skill-unlock + Pilgrim ending check
+///    consult — buying a form thus also makes its skill available
+///    in the Sage.
+pub fn buy_form(ctx: &mut DelegateCtx, form: u8, now_ms: u64) -> Result<Inventory, String> {
+    let mut inv = load_inventory_raw(ctx);
+    enter_action(&mut inv, now_ms)?;
+    let price = shared::form_buy_price(form)
+        .ok_or_else(|| format!("unknown form id {form}"))?;
+    if inv.current_form == form {
+        return Err("you are already in this form".into());
+    }
+    if inv.gold < price {
+        return Err(format!("need {price} gold, have {}", inv.gold));
+    }
+    inv.gold -= price;
+    inv.current_form = form;
+    inv.forms_visited.entry(form).or_insert(now_ms);
+    inv.current_hp = max_hp_of(&inv);
+    check_achievements(&mut inv, now_ms);
+    check_endings(&mut inv, now_ms, None);
+    save_inventory(ctx, &mut inv)?;
+    Ok(inv)
+}

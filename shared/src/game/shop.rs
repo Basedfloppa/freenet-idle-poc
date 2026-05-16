@@ -46,3 +46,22 @@ pub fn shop_roll_catalog_id(slot: u8, tier: u8, _counter: u64) -> Option<u16> {
 }
 
 pub const WHEAT_PER_GOLD: u64 = 10;
+
+/// Gold cost of a shop-bought form change. Returns `None` for the
+/// catch-all "unknown form" case so the delegate can reject the
+/// purchase. Human is intentionally the cheapest — it's the
+/// "panic reset" used when a player gets stuck in a defeat-
+/// induced form they didn't want; the other four are *much*
+/// more expensive because they're a strategic equip-mask + stat
+/// commitment that ICSBAH-style players will want to plan around.
+pub fn form_buy_price(form: u8) -> Option<u64> {
+    use super::{FORM_CAT, FORM_DRAGON, FORM_HORSE, FORM_HUMAN, FORM_SLIME};
+    match form {
+        FORM_HUMAN => Some(1_500),
+        FORM_SLIME => Some(20_000),
+        FORM_CAT => Some(25_000),
+        FORM_HORSE => Some(35_000),
+        FORM_DRAGON => Some(60_000),
+        _ => None,
+    }
+}

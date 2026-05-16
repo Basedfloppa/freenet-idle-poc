@@ -9,14 +9,19 @@
 use freenet_stdlib::prelude::*;
 
 use shared::{
-    estate_next_price, estate_tier, form_affinity_bp, EstateResource, Inventory,
-    IDLE_ACTION_AUTO_MISSION, IDLE_ACTION_ESTATE, IDLE_ACTION_NONE,
+    estate_next_price, estate_tier, form_affinity_bp, CatchupSummary, EstateResource,
+    Inventory, IDLE_ACTION_AUTO_MISSION, IDLE_ACTION_ESTATE, IDLE_ACTION_NONE,
 };
 
 use crate::progression::check_achievements;
 use crate::state::{enter_action, load_inventory_raw, save_inventory};
 
 const MAX_ESTATE_CATCHUP_SEC: u64 = 3_600;
+/// Minimum simulated Estate window before the welcome-back modal
+/// fires on return. Matches the auto-mission catchup threshold so
+/// both paths feel symmetric — short tab-flips don't trigger the
+/// modal, anything ≥1 minute does.
+const ESTATE_CATCHUP_REPORT_SEC: u64 = 60;
 
 /// Spend gold to hire one more worker of the given tier. Returns
 /// the post-mutation inventory so the webapp can re-render.
@@ -137,6 +142,27 @@ pub fn tick_estate(inv: &mut Inventory, now_ms: u64) {
     inv.base.base.gold = inv.base.base.gold.saturating_add(gold_gain);
     inv.base.base.wheat = inv.base.base.wheat.saturating_add(wheat_gain);
     inv.base.base.essence = inv.base.base.essence.saturating_add(essence_gain);
+    // Populate the welcome-back banner on long Estate windows.
+    // The schema's `CatchupSummary` was sized for the auto-mission
+    // loop (missions_won / xp_gained / boss_damage_gained), but
+    // gold/essence map cleanly onto Estate yield so the frontend
+    // surfaces the right "while you were away" copy. `wheat` rides
+    // in via `xp_gained` for now — schema extension is a follow-up
+    // when more fields are needed.
+    let started_ms = inv.estate.last_tick_ms;
+    if elapsed_sec >= ESTATE_CATCHUP_REPORT_SEC {
+        inv.base.base.last_catchup = Some(CatchupSummary {
+            started_ms,
+            ended_ms: started_ms.saturating_add(elapsed_sec.saturating_mul(1_000)),
+            ticks_simulated: elapsed_sec as u32,
+            missions_won: 0,
+            missions_lost: 0,
+            gold_gained: gold_gain,
+            essence_gained: essence_gain,
+            xp_gained: wheat_gain,
+            boss_damage_gained: 0,
+        });
+    }
     inv.estate.last_tick_ms = inv
         .estate
         .last_tick_ms

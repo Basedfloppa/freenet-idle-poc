@@ -79,18 +79,32 @@ pub fn render_battle_queue(
                 ENCOUNTERS_PER_MISSION,
             ) }
         </p>
-        {
-            if let Some(msg) = queued {
-                html! { <p class="muted small">{ msg }</p> }
-            } else { html! {} }
-        }
+        // Reserve a stable slot for the queued-action line —
+        // without this the panel jumps by one line every time a
+        // potion / fireball is queued or consumed. The
+        // `&nbsp;`-equivalent space keeps the slot visible to the
+        // layout engine even when empty.
+        <p class="muted small battle-queued-slot">
+            { queued.unwrap_or("\u{00a0}") }
+        </p>
         { render_battle_turns(locale, &battle.recent_turns) }
     </>}
 }
 
 pub fn render_battle_turns(locale: Locale, turns: &[shared::BattleTurn]) -> Html {
+    // Always render the <ul> so the panel keeps a stable DOM
+    // shape — paired with `min-height` on `ul.battle-turns` this
+    // stops the page reflowing as turns 0 → 5 land. The empty-
+    // state slot uses the same row class so its padding matches
+    // the populated rows.
     if turns.is_empty() {
-        return html! { <p class="muted small">{ locale.tr(MessageId::BattleOpeningTurn) }</p> };
+        return html! {
+            <ul class="battle-turns">
+                <li class="battle-turn-row muted">
+                    { locale.tr(MessageId::BattleOpeningTurn) }
+                </li>
+            </ul>
+        };
     }
     html! {
         <ul class="battle-turns">

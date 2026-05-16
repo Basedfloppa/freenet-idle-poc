@@ -65,6 +65,16 @@ pub fn run_mission(
 ) -> Result<Inventory, String> {
     let mut inv = load_inventory_raw(ctx);
     enter_action(&mut inv, now_ms)?;
+    // Single-active-action rule (§5.6): Estate locks out combat.
+    // Player has to explicitly toggle Estate off (or click Run
+    // Mission via the disabled-button path that won't fire the
+    // RPC anyway) before they can fight. Keeping the gate
+    // server-side means a desync'd frontend can't bypass it.
+    if inv.idle_action == shared::IDLE_ACTION_ESTATE {
+        return Err(
+            "Estate is the active idle action — stop it from the Estate panel to run missions.".into(),
+        );
+    }
     crate::actions::catch_up_auto(&mut inv, now_ms);
     if inv.current_battle.is_none() {
         let _ = start_battle(&mut inv, now_ms)?;

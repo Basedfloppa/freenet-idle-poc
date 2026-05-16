@@ -54,3 +54,19 @@ pub fn buy_skill_once(
         "buy skill",
     );
 }
+
+pub fn buy_form_once(
+    core: CoreCell,
+    pending: PendingCell,
+    bump: UseStateSetter<u64>,
+    form: u8,
+) {
+    let now_ms = now_ms();
+    delegate_op_once(
+        core,
+        pending,
+        bump,
+        AppRequest::BuyForm { form, now_ms },
+        "buy form",
+    );
+}

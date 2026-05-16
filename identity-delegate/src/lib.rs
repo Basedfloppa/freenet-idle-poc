@@ -152,6 +152,9 @@ impl DelegateInterface for IdentityDelegate {
                 map_inv(actions::buy_legacy_node(ctx, node_id, now_ms))
             }
             AppRequest::Ascend { now_ms } => map_inv(actions::ascend(ctx, now_ms)),
+            AppRequest::BuyForm { form, now_ms } => {
+                map_inv(actions::buy_form(ctx, form, now_ms))
+            }
         };
 
         let out_envelope = DelegateEnvelopeOut {

@@ -174,6 +174,12 @@ pub enum DelegateRequest {
     /// nodes, identity, level, mission_count. Increments
     /// `ascend_count`. (Backlog C1, opt-in personal ascension.)
     Ascend { now_ms: u64 },
+    /// Purchase a form change from the shop. `form == FORM_HUMAN`
+    /// is the cheap reset path; other forms cost substantially more
+    /// per `form_buy_price`. The delegate validates gold and adds
+    /// the form to `forms_visited` so first-time purchases unlock
+    /// the matching skill (mirrors the defeat-based form change).
+    BuyForm { form: u8, now_ms: u64 },
 }
 
 /// Domain split for blob-encoded persisted state. Each variant maps

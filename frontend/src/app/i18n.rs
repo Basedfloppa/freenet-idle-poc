@@ -440,6 +440,8 @@ impl Locale {
             // ── Tooltips & ambient hints (HTML title attribute) ──
             (Self::En, MessageId::TipFightInProgress) => "fight in progress — wait for the current battle to end",
             (Self::Ru, MessageId::TipFightInProgress) => "идёт бой — дождись окончания текущей схватки",
+            (Self::En, MessageId::TipEstateBlocksCombat) => "Estate is active — pause it from the Estate panel to fight",
+            (Self::Ru, MessageId::TipEstateBlocksCombat) => "Поместье активно — останови его на панели поместья, чтобы сражаться",
             (Self::En, MessageId::TipAutoToggleMidFight) => "auto toggle still works during a fight — the new setting takes effect once the current battle ends",
             (Self::Ru, MessageId::TipAutoToggleMidFight) => "переключатель авто работает и в бою — новое значение применится после окончания текущей схватки",
             (Self::En, MessageId::TipAutoEquipBest) => "walk every slot and equip the highest stat-sum piece you own",
@@ -546,6 +548,17 @@ impl Locale {
                 "A newer build is live — no detailed changelog this time.",
             (Self::Ru, MessageId::NewerBuildDesc) =>
                 "Сейчас работает более свежая сборка — подробного списка изменений на этот раз нет.",
+
+            (Self::En, MessageId::PanelFormsShop) => "Forms",
+            (Self::Ru, MessageId::PanelFormsShop) => "Формы",
+            (Self::En, MessageId::FormsShopDesc) =>
+                "Reset your shape (Human is cheap) or commit gold to one of the other four forms. Direct purchase mirrors a defeat-induced transformation: the form is added to your visited set so its skill unlocks at the Sage.",
+            (Self::Ru, MessageId::FormsShopDesc) =>
+                "Сбрось облик (Человек стоит дёшево) или вложи золото в одну из четырёх остальных форм. Покупка работает как трансформация после поражения: форма добавляется в твой набор посещённых, и её навык открывается у Мудреца.",
+            (Self::En, MessageId::FormsShopBaselineDesc) => "balanced baseline — no stat bundle",
+            (Self::Ru, MessageId::FormsShopBaselineDesc) => "сбалансированная база — без бонусов",
+            (Self::En, MessageId::TipFormAlreadyActive) => "you are already in this form",
+            (Self::Ru, MessageId::TipFormAlreadyActive) => "ты уже в этой форме",
 
             // German (C5). Selective overrides for the highest-impact
             // surface area (tabs, status pills) — anything not listed
@@ -1372,6 +1385,12 @@ pub enum MessageId {
     BtnGotIt,
     NewerBuildDesc,
 
+    // Forms shop (#40).
+    PanelFormsShop,
+    FormsShopDesc,
+    FormsShopBaselineDesc,
+    TipFormAlreadyActive,
+
     // Settings descriptive paragraphs (long copy that lives next to
     // each h3). Several read as inline fragments next to a <strong>
     // (BodyStrong, BodyTail) so they can be reassembled in Yew.
@@ -1413,6 +1432,7 @@ pub enum MessageId {
     TipAutoToggleMidFight,
     TipAutoEquipBest,
     TipAutoEquipNothing,
+    TipEstateBlocksCombat,
     TipPotionQueue,
     TipPotionIdle,
     TipFireballQueue,

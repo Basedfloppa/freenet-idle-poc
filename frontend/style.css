@@ -372,6 +372,38 @@ h3 { font-size: 0.82em; color: var(--fg-muted); margin: 1em 0 0.4em; text-transf
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 0.5em;
 }
+/* Graph layout (C3a) — one column per depth from a starter, cards
+   stacked top-to-bottom inside. Horizontal scroll on overflow so
+   deep graphs read like a Subway diagram instead of collapsing.
+   Mobile collapses everything back to a single column. */
+.area-graph {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(190px, 1fr);
+    gap: 0.75em;
+    overflow-x: auto;
+    padding-bottom: 0.4em;
+}
+.area-graph .graph-col {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5em;
+}
+.area-graph .graph-node { position: relative; }
+/* Per-card hint showing the upstream area names — "↳ Forest Road".
+   Sits below each non-starter card; small muted line so it doesn't
+   compete with the card's title. */
+.area-graph .graph-edge-hint {
+    margin: 0.15em 0 0 0.4em;
+    font-size: 0.78em;
+    color: var(--fg-muted);
+}
+@media (max-width: 720px) {
+    .area-graph {
+        grid-auto-flow: row;
+        grid-auto-columns: auto;
+    }
+}
 .area-card {
     display: flex;
     flex-direction: column;
@@ -706,6 +738,12 @@ ul.battle-turns {
     display: flex;
     flex-direction: column;
     gap: 0.15em;
+    /* Reserve room for the full 5-row history (battle.rs renders
+       up to 5). Without this the panel grows from 0 → 5 lines as
+       turns accumulate and the page reflows. Five rows × line-
+       height ≈ 9em comfortable. */
+    min-height: 9em;
+    justify-content: flex-end;
 }
 .battle-turn-row {
     font-size: 0.78em;

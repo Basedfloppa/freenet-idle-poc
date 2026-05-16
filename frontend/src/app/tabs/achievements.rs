@@ -3,8 +3,8 @@
 //! global World Boss bar and leaderboard.
 
 use shared::{
-    form_sprite, format_si,
-    Inventory, PresencePayload, PubKey, ACHIEVEMENT_TABLE, ENDINGS_TOTAL, ENDING_DRAGON_LORD,
+    form_base_bonuses, form_speed_evasion, form_sprite, format_si, Inventory,
+    PresencePayload, PubKey, ACHIEVEMENT_TABLE, ENDINGS_TOTAL, ENDING_DRAGON_LORD,
     ENDING_PILGRIM, ENDING_QUIET_FARMER, ENDING_VICTORY,
 };
 use yew::prelude::*;
@@ -89,8 +89,32 @@ pub fn render_achievements_tab(
                 }
                 <h3>{ locale.tr(MessageId::PanelFormsVisited) }</h3>
                 <div class="badges">
-                    { for inv.forms_visited.keys().map(|f| html! {
-                        <span class="achievement">{ format!("{} {}", form_sprite(*f), i18n_shared::form_name(locale, *f)) }</span>
+                    { for inv.forms_visited.keys().map(|f| {
+                        // Hover tooltip = the form's stat bundle so
+                        // the player can scan the Achievements tab
+                        // for "which form gives me what". Mirrors
+                        // the live computation used in combat
+                        // (form_base_bonuses + form_speed_evasion).
+                        let (atk, def, hp) = form_base_bonuses(*f);
+                        let (speed, eva) = form_speed_evasion(*f);
+                        let mut parts: Vec<String> = Vec::new();
+                        if atk > 0 { parts.push(format!("+{atk} atk")); }
+                        if def > 0 { parts.push(format!("+{def} def")); }
+                        if hp > 0 { parts.push(format!("+{hp} hp")); }
+                        if speed != 100 { parts.push(format!("speed {speed}")); }
+                        if eva > 0 { parts.push(format!("+{eva}% eva")); }
+                        let tooltip = if parts.is_empty() {
+                            i18n_shared::form_name(locale, *f).to_string()
+                        } else {
+                            format!("{} — {}",
+                                i18n_shared::form_name(locale, *f),
+                                parts.join(", "))
+                        };
+                        html! {
+                            <span class="achievement" title={tooltip}>
+                                { format!("{} {}", form_sprite(*f), i18n_shared::form_name(locale, *f)) }
+                            </span>
+                        }
                     }) }
                 </div>
             </section>
