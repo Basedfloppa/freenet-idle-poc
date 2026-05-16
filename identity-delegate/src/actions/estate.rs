@@ -9,8 +9,9 @@
 use freenet_stdlib::prelude::*;
 
 use shared::{
-    estate_next_price, estate_tier, form_affinity_bp, CatchupSummary, EstateResource,
-    Inventory, IDLE_ACTION_AUTO_MISSION, IDLE_ACTION_ESTATE, IDLE_ACTION_NONE,
+    estate_next_price, estate_tier, form_affinity_bp_with_insight, CatchupSummary,
+    EstateResource, Inventory, IDLE_ACTION_AUTO_MISSION, IDLE_ACTION_ESTATE,
+    IDLE_ACTION_NONE,
 };
 
 use crate::progression::check_achievements;
@@ -128,7 +129,10 @@ pub fn tick_estate(inv: &mut Inventory, now_ms: u64) {
             Some(t) => t,
             None => continue,
         };
-        let aff = form_affinity_bp(form, tier_id);
+        let insight_aff_level = inv
+            .insight
+            .node_level(shared::InsightNode::FormAffinity);
+        let aff = form_affinity_bp_with_insight(form, tier_id, insight_aff_level);
         // yield_per_sec * count * elapsed * affinity_bp / 10_000
         let raw = tier
             .yield_per_sec

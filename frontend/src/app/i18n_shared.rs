@@ -284,19 +284,32 @@ pub fn gear_name(locale: Locale, t: &GearTemplate) -> String {
 /// beyond the table.
 pub fn chapter(locale: Locale, inv: &Inventory) -> (u8, String, String) {
     let area_id = inv.current_area;
-    let area = shared::area_of(area_id);
-    let name_l = area_name(locale, area);
-    // Chapter number tracks the area-id so newly-added branches
-    // (C3a: Deep Forest, Snowfields, …) get their own number
-    // instead of all falling through to "Chapter 4 · Boss's Lair".
-    // Display the area's own localised name in the title so the
-    // header above the battle window updates the moment the
-    // player switches zones.
-    let chap_no = area_id.saturating_add(1);
-    let title = match locale.fmt_locale() {
-        Locale::En => format!("Chapter {chap_no} · {name_l}"),
-        Locale::Ru => format!("Глава {chap_no} · {name_l}"),
-        Locale::De => unreachable!("fmt_locale normalises De"),
+    // Resolve via the unified lookup so Wilds areas (id ≥ 100)
+    // pick up their procedural name instead of falling through
+    // to the static AREAS[0] starter.
+    let area = shared::current_area_def(inv);
+    let name_l = area_name(locale, &area);
+    let is_wilds = area_id >= shared::WILDS_AREA_BASE;
+    // Title format diverges for Wilds — those areas aren't part
+    // of the linear chapter chain, so "Chapter 101" would read
+    // wrong. Use a "Wilds · <name>" prefix instead. For the
+    // numeric `chap_no` the function returns, keep `area_id +
+    // 1` for hardcoded areas and the Wilds depth-offset
+    // (1..8) so the caller's chapter widget stays bounded.
+    let chap_no = if is_wilds {
+        // Wilds nodes are numbered locally within Wilds (1..=8).
+        area_id
+            .saturating_sub(shared::WILDS_AREA_BASE)
+            .saturating_add(1)
+    } else {
+        area_id.saturating_add(1)
+    };
+    let title = match (locale.fmt_locale(), is_wilds) {
+        (Locale::En, false) => format!("Chapter {chap_no} · {name_l}"),
+        (Locale::Ru, false) => format!("Глава {chap_no} · {name_l}"),
+        (Locale::En, true) => format!("Wilds {chap_no} · {name_l}"),
+        (Locale::Ru, true) => format!("Дикие земли {chap_no} · {name_l}"),
+        (Locale::De, _) => unreachable!("fmt_locale normalises De"),
     };
     // Curated lore strings for the original four zones; new branch
     // areas fall back to the AreaDef blurb so the body never
@@ -325,7 +338,7 @@ pub fn chapter(locale: Locale, inv: &Inventory) -> (u8, String, String) {
         // Branch areas (4 Deep Forest, 5 Snowfields, …) and any
         // future addition: fall back to the area blurb. Cheap and
         // always-accurate.
-        _ => area_blurb(locale, area).to_string(),
+        _ => area_blurb(locale, &area).to_string(),
     };
     (chap_no, title, body)
 }

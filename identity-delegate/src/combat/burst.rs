@@ -55,7 +55,11 @@ fn resolve_encounter_burst(
     enemy_id: u16,
     now_ms: u64,
 ) -> (u8, u64) {
-    let area = *area_of(inv.current_area);
+    // `current_area_def` resolves Wilds ids too (procedurally
+    // generated AreaDef vs the static AREAS table). The
+    // returned value is owned so we don't need the `*` deref
+    // the old `area_of` form had.
+    let area = shared::current_area_def(inv);
     let Some(enemy) = enemy_def(enemy_id).copied() else {
         return (COMBAT_OUTCOME_LOSS, 0);
     };
@@ -117,11 +121,22 @@ fn resolve_encounter_burst(
         // Per-area clear counter — feeds the unlock-gate for the
         // next area (A3 in `docs/gameplay-backlog.md`).
         inv.area_clears_inc(area.id);
-        // Legacy multiplier on mission gold (C1).
-        let gold_mult_bp = inv
+        // Legacy multiplier on mission gold (C1) + Insight
+        // GoldDropPct (B5, +1% per node level) — compound
+        // multiplicatively. Both default to 10_000 (×1.0)
+        // when no nodes are owned.
+        let legacy_bp = inv
             .legacy
             .node_multiplier_bp(shared::LegacyNode::MissionGold);
-        let gold_gained = gold_gained.saturating_mul(gold_mult_bp) / 10_000;
+        let insight_bp = 10_000u64.saturating_add(
+            inv.insight
+                .node_level(shared::InsightNode::GoldDropPct)
+                .saturating_mul(100),
+        );
+        let gold_gained = gold_gained
+            .saturating_mul(legacy_bp) / 10_000;
+        let gold_gained = gold_gained
+            .saturating_mul(insight_bp) / 10_000;
         inv.gold = inv.gold.saturating_add(gold_gained);
         inv.essence = inv
             .essence

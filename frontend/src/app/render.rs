@@ -5,7 +5,7 @@
 //! sub-views composed from `widgets`.
 
 use shared::{
-    area_of, form_slot_mask, form_sprite, format_si, level_of,
+    form_slot_mask, form_sprite, format_si, level_of,
     shop_buy_price, skill_buy_price, PresencePayload, PubKey,
     AREAS, CONSUMABLE_FIREBALL, CONSUMABLE_POTION, ENCOUNTERS_PER_MISSION,
     FIREBALL_BOSS_DAMAGE, FIREBALL_PRICE, MISSION_DAMAGE, MISSION_ESSENCE, MISSION_GOLD,
@@ -431,6 +431,23 @@ pub fn render_core(
     };
     let on_sell_potions = mk_sell_consumable_cb(CONSUMABLE_POTION);
     let on_sell_fireballs = mk_sell_consumable_cb(CONSUMABLE_FIREBALL);
+
+    // World-map view switcher (Linear ↔ Wilds). UI-only state on
+    // `Core::map_view`; flip + bump triggers a re-render.
+    let mk_map_view_cb = {
+        let core = core_cell.clone();
+        let bump = bump.clone();
+        move |view: crate::app::types::MapView| {
+            let core = core.clone();
+            let bump = bump.clone();
+            Callback::from(move |_| {
+                if let Some(c) = core.borrow_mut().as_mut() {
+                    c.map_view = view;
+                }
+                bump.set(now_ms());
+            })
+        }
+    };
 
     // Buy-form callback factory (one closure per form id). Used by
     // the shop's Forms panel — cheap Human reset + expensive
@@ -1111,7 +1128,9 @@ pub fn render_core(
     let atk = attack_from(inv);
     let def = defence_from(inv);
     let (chap_no, chap_title, chap_body_map) = i18n_shared::chapter(locale, inv);
-    let area = area_of(inv.current_area);
+    // Owned AreaDef so Wilds (id ≥ 100) returns its dynamic
+    // entry instead of falling through to the Village starter.
+    let area = shared::current_area_def(inv);
     let _mission_gold = MISSION_GOLD.saturating_mul(area.gold_mult);
     let mission_essence = MISSION_ESSENCE.saturating_mul(area.essence_mult);
     let mission_damage = MISSION_DAMAGE.saturating_mul(area.damage_mult);
@@ -1128,6 +1147,11 @@ pub fn render_core(
     // would feel like a no-op. New players without a Farmhand
     // still get the original click-to-farm path.
     let farmhand_active = inv.base.base.estate.workers_of(0) > 0;
+    // Show the Linear/Wilds map switcher once the player has
+    // some buffer over Wilds-entrance min_level (15). Five-level
+    // buffer so the option appears slightly before it becomes
+    // useful — players get to see the second map exists.
+    let wilds_unlocked = lvl + 5 >= 15;
     let auto_equip_can_improve = crate::game::derived::auto_equip_would_change(inv);
     let auto_equip_tip: String = if auto_equip_can_improve {
         locale.tr(MessageId::TipAutoEquipBest).to_string()
@@ -1451,7 +1475,7 @@ pub fn render_core(
                                             <p class="tooltip muted">
                                                 {
                                                     locale.fmt_mission_summary(
-                                                        i18n_shared::area_name(locale, area),
+                                                        i18n_shared::area_name(locale, &area),
                                                         ENCOUNTERS_PER_MISSION,
                                                         mission_essence,
                                                         mission_damage,
@@ -1646,7 +1670,10 @@ pub fn render_core(
                                                 { for shared::ESTATE_TIERS.iter().map(|tier| {
                                                     let owned = inv.estate.workers_of(tier.id);
                                                     let next_price = shared::estate_next_price(tier, owned);
-                                                    let aff_bp = shared::form_affinity_bp(inv.current_form, tier.id);
+                                                    let insight_aff = inv.insight.node_level(shared::InsightNode::FormAffinity);
+                                                    let aff_bp = shared::form_affinity_bp_with_insight(
+                                                        inv.current_form, tier.id, insight_aff,
+                                                    );
                                                     let res_label = match tier.produces {
                                                         shared::EstateResource::Wheat => locale.tr(MessageId::EstateResWheat),
                                                         shared::EstateResource::Gold => locale.tr(MessageId::EstateResGold),
@@ -1714,66 +1741,70 @@ pub fn render_core(
                         <section class="panel world-map">
                             <h2>{ locale.tr(MessageId::PanelWorldMap) }</h2>
                             <p class="muted small">
-                                { locale.fmt_currently_farming(i18n_shared::area_name(locale, area), lvl) }
+                                { locale.fmt_currently_farming(i18n_shared::area_name(locale, &area), lvl) }
                             </p>
-                            // Graph view (C3a): top-to-bottom tree
-                            // — one row per depth, cards within a
-                            // row laid out horizontally and
-                            // centred. Each non-starter card has a
-                            // CSS connector line + arrowhead above
-                            // it (see `.graph-node.has-parent` in
-                            // style.css) plus a localised "↑
-                            // Predecessor" label. The flow grows
-                            // downward as new branches ship —
-                            // adding a row is just `predecessors:
-                            // &[parent_id]` on an `AreaDef`.
-                            <div class="area-graph">
-                                { for area_columns.iter().map(|(depth, row_areas)| html! {
-                                    <div class={classes!("graph-row", format!("depth-{}", depth))}>
-                                        { for row_areas.iter().map(|a| {
-                                            let has_parent = !a.predecessors.is_empty();
-                                            let upstream_label = if has_parent {
-                                                let names: Vec<String> = a.predecessors
-                                                    .iter()
-                                                    .filter_map(|pid| shared::AREAS.iter().find(|x| x.id == *pid))
-                                                    .map(|p| i18n_shared::area_name(locale, p).to_string())
-                                                    .collect();
-                                                Some(format!("↑ {}", names.join(" / ")))
-                                            } else {
-                                                None
-                                            };
-                                            let node_cls = if has_parent { "graph-node has-parent" } else { "graph-node starter" };
-                                            html! {
-                                                <div class={node_cls}>
-                                                    {
-                                                        if let Some(label) = upstream_label.as_ref() {
-                                                            html! { <p class="graph-edge-hint">{ label }</p> }
-                                                        } else { html! {} }
-                                                    }
-                                                    { render_area_card(locale, a, inv.current_area, lvl, inv, &mk_set_area_cb) }
+                            // Map-view switcher (Linear ↔ Wilds).
+                            // Wilds tab is gated by entrance level
+                            // so a fresh player doesn't see a
+                            // locked second option staring back at
+                            // them. Selection is UI-only — picking
+                            // a node from either view still goes
+                            // through the same `SetArea` RPC.
+                            {
+                                if wilds_unlocked {
+                                    html! {
+                                        <div class="map-switcher">
+                                            <button
+                                                class={if c.map_view == crate::app::types::MapView::Linear { "primary" } else { "" }}
+                                                onclick={mk_map_view_cb(crate::app::types::MapView::Linear)}>
+                                                { locale.tr(MessageId::MapViewLinear) }
+                                            </button>
+                                            <button
+                                                class={if c.map_view == crate::app::types::MapView::Wilds { "primary" } else { "" }}
+                                                onclick={mk_map_view_cb(crate::app::types::MapView::Wilds)}>
+                                                { locale.tr(MessageId::MapViewWilds) }
+                                            </button>
+                                        </div>
+                                    }
+                                } else { html! {} }
+                            }
+                            {
+                                if c.map_view == crate::app::types::MapView::Linear {
+                                    html! {
+                                        <div class="area-graph">
+                                            { for area_columns.iter().map(|(depth, row_areas)| html! {
+                                                <div class={classes!("graph-row", format!("depth-{}", depth))}>
+                                                    { for row_areas.iter().map(|a| {
+                                                        let has_parent = !a.predecessors.is_empty();
+                                                        let upstream_label = if has_parent {
+                                                            let names: Vec<String> = a.predecessors
+                                                                .iter()
+                                                                .filter_map(|pid| shared::AREAS.iter().find(|x| x.id == *pid))
+                                                                .map(|p| i18n_shared::area_name(locale, p).to_string())
+                                                                .collect();
+                                                            Some(format!("↑ {}", names.join(" / ")))
+                                                        } else { None };
+                                                        let node_cls = if has_parent { "graph-node has-parent" } else { "graph-node starter" };
+                                                        html! {
+                                                            <div class={node_cls}>
+                                                                { if let Some(label) = upstream_label.as_ref() {
+                                                                    html! { <p class="graph-edge-hint">{ label }</p> }
+                                                                } else { html! {} } }
+                                                                { render_area_card(locale, a, inv.current_area, lvl, inv, &mk_set_area_cb) }
+                                                            </div>
+                                                        }
+                                                    }) }
                                                 </div>
-                                            }
-                                        }) }
-                                    </div>
-                                }) }
-                            </div>
+                                            }) }
+                                        </div>
+                                    }
+                                } else {
+                                    render_wilds_panel_body(c, locale, &mk_set_area_cb)
+                                }
+                            }
                         </section>
-                        // Per-zone activities panel (A1). Only the
-                        // activities matching `inv.current_area`
-                        // are listed; switching area clears the
-                        // active activity server-side (see
-                        // `set_area`). Picking an activity sets
-                        // `idle_action = IDLE_ACTION_ACTIVITY` and
-                        // locks out auto-mission / Estate.
+                        // Per-zone activities panel (A1).
                         { render_activities_panel(c, locale, core_cell.clone(), pending.clone(), bump.clone()) }
-                        // Wilds graph (C3b). Hidden until the player
-                        // reaches the entry-area's min_level so the
-                        // late-game alt-progression doesn't clutter
-                        // the early UI. Same depth-row layout as the
-                        // main map; node IDs sit in the `100+`
-                        // namespace so they don't collide with the
-                        // linear chain.
-                        { render_wilds_panel(c, locale, &mk_set_area_cb) }
                         <section class="panel plot">
                             <h2>{ locale.tr(MessageId::PanelPlotSoFar) }</h2>
                             <p class="chapter-no muted">{ locale.fmt_chapter(chap_no as u64) }</p>
@@ -2898,7 +2929,7 @@ fn render_activities_panel(
 /// met so it doesn't clutter the early game. Same depth-row
 /// layout as the main graph; activity / mission paths see the
 /// dynamic AreaDef the same way they see static `AREAS`.
-fn render_wilds_panel<F>(
+fn render_wilds_panel_body<F>(
     c: &Core,
     locale: Locale,
     mk_set_area_cb: &F,
@@ -2906,11 +2937,10 @@ fn render_wilds_panel<F>(
 where
     F: Fn(u8) -> Callback<MouseEvent>,
 {
+    let _ = locale;
     let inv = &c.inventory;
     let lvl = shared::level_of(inv);
     let wilds = shared::wilds_areas(inv.plot_seed);
-    // Gate the whole panel on the entrance area's level — no
-    // point showing a locked panel to new players.
     let entrance = match wilds.iter().find(|a| a.id == shared::WILDS_AREA_BASE) {
         Some(e) => e,
         None => return html! {},
@@ -2954,35 +2984,31 @@ where
         by_depth.entry(d).or_default().push(area);
     }
     html! {
-        <section class="panel world-map wilds">
-            <h2>{ locale.tr(MessageId::PanelWilds) }</h2>
-            <p class="muted small">{ locale.tr(MessageId::WildsDesc) }</p>
-            <div class="area-graph">
-                { for by_depth.iter().map(|(_depth, row_areas)| html! {
-                    <div class="graph-row">
-                        { for row_areas.iter().map(|a| {
-                            let has_parent = !a.predecessors.is_empty();
-                            let upstream_label = if has_parent {
-                                let names: Vec<String> = a.predecessors
-                                    .iter()
-                                    .filter_map(|pid| wilds.iter().find(|x| x.id == *pid))
-                                    .map(|p| p.name.to_string())
-                                    .collect();
-                                Some(format!("↑ {}", names.join(" / ")))
-                            } else { None };
-                            let node_cls = if has_parent { "graph-node has-parent" } else { "graph-node starter" };
-                            html! {
-                                <div class={node_cls}>
-                                    { if let Some(label) = upstream_label.as_ref() {
-                                        html! { <p class="graph-edge-hint">{ label }</p> }
-                                    } else { html! {} } }
-                                    { render_area_card(locale, a, inv.current_area, lvl, inv, mk_set_area_cb) }
-                                </div>
-                            }
-                        }) }
-                    </div>
-                }) }
-            </div>
-        </section>
+        <div class="area-graph wilds">
+            { for by_depth.iter().map(|(_depth, row_areas)| html! {
+                <div class="graph-row">
+                    { for row_areas.iter().map(|a| {
+                        let has_parent = !a.predecessors.is_empty();
+                        let upstream_label = if has_parent {
+                            let names: Vec<String> = a.predecessors
+                                .iter()
+                                .filter_map(|pid| wilds.iter().find(|x| x.id == *pid))
+                                .map(|p| p.name.to_string())
+                                .collect();
+                            Some(format!("↑ {}", names.join(" / ")))
+                        } else { None };
+                        let node_cls = if has_parent { "graph-node has-parent" } else { "graph-node starter" };
+                        html! {
+                            <div class={node_cls}>
+                                { if let Some(label) = upstream_label.as_ref() {
+                                    html! { <p class="graph-edge-hint">{ label }</p> }
+                                } else { html! {} } }
+                                { render_area_card(locale, a, inv.current_area, lvl, inv, mk_set_area_cb) }
+                            </div>
+                        }
+                    }) }
+                </div>
+            }) }
+        </div>
     }
 }

@@ -110,6 +110,7 @@ fn app() -> Html {
                 last_seen_version: None,
                 catchup_modal_dismissed: false,
                 last_catchup_acked_started_ms: 0,
+                map_view: crate::app::types::MapView::default(),
             });
             // Apply the default theme for first paint; the delegate's
             // `LoadUiPrefs` reply re-applies the player's saved theme

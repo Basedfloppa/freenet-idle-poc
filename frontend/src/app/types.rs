@@ -22,6 +22,18 @@ pub enum Tab {
     Help,
 }
 
+/// Which world-map view the player is currently looking at. UI
+/// only — the player can still `SetArea` to any unlocked node
+/// regardless of which view is showing. Switching views just
+/// hides one graph and shows the other so the World Map tab
+/// stays readable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MapView {
+    #[default]
+    Linear,
+    Wilds,
+}
+
 /// Boolean prefs the Settings UI exposes as on/off toggles. Lives in
 /// one enum so a single closure factory (`mk_toggle_cb`) covers all
 /// of them — no copy-pasted `core.borrow_mut() … save_prefs(…)`

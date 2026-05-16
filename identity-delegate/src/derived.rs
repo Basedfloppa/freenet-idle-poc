@@ -44,9 +44,17 @@ pub fn total_bonuses(inv: &Inventory) -> (u64, u64, u64) {
 pub fn max_hp_of(inv: &Inventory) -> u64 {
     let lvl = level_of(inv);
     let (_, _, hp_bonus) = total_bonuses(inv);
+    // Insight HpPerLevel node — `+1 HP per hero level per node
+    // level`. Read-back path that the original B5 MVP skipped;
+    // node was being purchased but the spend did nothing.
+    let insight_hp = inv
+        .insight
+        .node_level(shared::InsightNode::HpPerLevel)
+        .saturating_mul(lvl);
     20u64
         .saturating_add(lvl.saturating_mul(5))
         .saturating_add(hp_bonus)
+        .saturating_add(insight_hp)
 }
 
 pub fn attack_of(inv: &Inventory) -> u64 {

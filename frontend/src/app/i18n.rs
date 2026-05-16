@@ -652,6 +652,10 @@ impl Locale {
                 "Late-game alternate map, procedurally generated from your plot seed. Names + enemy stat noise are unique to you; topology is fixed (8 nodes, two branches off the entrance, a confluence node). No World Boss contribution.",
             (Self::Ru, MessageId::WildsDesc) =>
                 "Альтернативная карта поздней игры, процедурно сгенерированная из твоего сюжетного зерна. Названия и разброс характеристик уникальны для тебя; топология фиксирована (8 узлов, две ветви от входа, узел-схождение). Урон по Мировому Боссу не наносится.",
+            (Self::En, MessageId::MapViewLinear) => "Linear",
+            (Self::Ru, MessageId::MapViewLinear) => "Основная",
+            (Self::En, MessageId::MapViewWilds) => "Wilds",
+            (Self::Ru, MessageId::MapViewWilds) => "Дикие земли",
 
             // German (C5). Selective overrides for the highest-impact
             // surface area (tabs, status pills) — anything not listed
@@ -1533,6 +1537,8 @@ pub enum MessageId {
     MasteryIntro,
     PanelWilds,
     WildsDesc,
+    MapViewLinear,
+    MapViewWilds,
 
     // Settings descriptive paragraphs (long copy that lives next to
     // each h3). Several read as inline fragments next to a <strong>

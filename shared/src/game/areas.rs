@@ -147,6 +147,14 @@ pub fn resolve_area(id: u8, plot_seed: u32) -> Option<AreaDef> {
     }
 }
 
+/// Convenience over `resolve_area` that takes `&Inventory` so
+/// callers don't have to thread `current_area` + `plot_seed`
+/// separately. Falls back to the starter area on a lookup miss
+/// so combat / render paths never have to handle `None`.
+pub fn current_area_def(inv: &super::inventory::Inventory) -> AreaDef {
+    resolve_area(inv.current_area, inv.plot_seed).unwrap_or(AREAS[0])
+}
+
 /// All predecessor area ids whose clear-count can satisfy the gate
 /// on `area_id`. Empty slice = starter area / no predecessor.
 /// OR-semantic: the player only needs `clears_required` clears in

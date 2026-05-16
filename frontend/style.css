@@ -382,6 +382,21 @@ h3 { font-size: 0.82em; color: var(--fg-muted); margin: 1em 0 0.4em; text-transf
     color: var(--fg-soft);
 }
 
+/* World-map view switcher (Linear ↔ Wilds). Sits between the
+   "currently farming" line and the graph itself; uses the
+   active-tab visual treatment so the selected map type reads
+   like a sub-tab. */
+.map-switcher {
+    display: flex;
+    gap: 0.4em;
+    margin: 0.4em 0 0.6em;
+}
+.map-switcher button.primary {
+    background: var(--tab-active-bg);
+    border-color: var(--tab-active-border);
+    color: var(--tab-active-fg);
+}
+
 /* Graph layout (C3a) — top-to-bottom tree. Each depth is its own
    row; areas at that depth share the row horizontally and stay
    centred so branches splay symmetrically. Each non-starter card

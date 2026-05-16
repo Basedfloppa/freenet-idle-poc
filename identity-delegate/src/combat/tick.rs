@@ -282,14 +282,22 @@ fn run_one_turn(inv: &mut Inventory, turn_ms: u64) -> TurnOutcome {
 /// NOT touch `current_battle` (the caller decides whether to advance
 /// the chain or finalize the mission).
 fn end_encounter_win(inv: &mut Inventory, enemy_id: u16, turn_ms: u64) {
-    let area = *area_of(inv.current_area);
+    let area = shared::current_area_def(inv);
     let Some(enemy) = enemy_def(enemy_id).copied() else { return };
     let raw_gold = enemy.gold_reward.saturating_mul(area.gold_mult);
-    // Legacy multiplier on mission gold (C1).
-    let gold_mult_bp = inv
+    // Legacy MissionGold (C1) + Insight GoldDropPct (B5)
+    // applied multiplicatively. Insight is +1% per node level
+    // on top of Legacy's per-level multiplier.
+    let legacy_bp = inv
         .legacy
         .node_multiplier_bp(shared::LegacyNode::MissionGold);
-    let gold_gained = raw_gold.saturating_mul(gold_mult_bp) / 10_000;
+    let insight_bp = 10_000u64.saturating_add(
+        inv.insight
+            .node_level(shared::InsightNode::GoldDropPct)
+            .saturating_mul(100),
+    );
+    let gold_after_legacy = raw_gold.saturating_mul(legacy_bp) / 10_000;
+    let gold_gained = gold_after_legacy.saturating_mul(insight_bp) / 10_000;
     inv.mission_count = inv.mission_count.saturating_add(1);
     // Per-area clear counter — feeds the unlock-gate for the
     // next area (A3 in `docs/gameplay-backlog.md`).
@@ -400,7 +408,7 @@ fn advance_to_next_encounter(inv: &mut Inventory, turn_ms: u64) {
 /// `current_battle`. Player HP stays at 0 or the post-transform
 /// fraction — same rules the burst-mode resolver applied.
 fn end_battle_loss(inv: &mut Inventory, enemy_id: u16, turn_ms: u64) {
-    let area = *area_of(inv.current_area);
+    let area = shared::current_area_def(inv);
     let Some(enemy) = enemy_def(enemy_id).copied() else {
         inv.current_battle = None;
         return;

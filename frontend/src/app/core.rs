@@ -155,6 +155,11 @@ pub struct Core {
     /// the delegate, but that path raced the unified auto-tick
     /// and the modal vanished before the player could click.
     pub last_catchup_acked_started_ms: u64,
+    /// Currently-selected World Map view — Linear chain or the
+    /// procedural Wilds graph. UI-only; doesn't touch the
+    /// delegate or the inventory. Default Linear because Wilds
+    /// is gated on level 10+ anyway.
+    pub map_view: super::types::MapView,
 }
 
 /// Apply a fresh `Inventory` from the delegate into `Core`,

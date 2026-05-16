@@ -17,8 +17,8 @@ use web_sys::Response;
 pub const CONTRACT_ID_B58: &str = "DW6vbKtz6THYMzYd1nyNJHtrDP5Hm6RFBmBFQsqLyBCU";
 pub const CODE_HASH_B58: &str = "3uf35pYiL8UdXvCs4S2H95gdZ8u5SXALUWousbwiqqFk";
 
-pub const DELEGATE_KEY_B58: &str = "FJsdg8mtqGhxzNBZUHk5zmQo8pMrYQqrsFSG7WBrVTe6";
-pub const DELEGATE_CODE_HASH_B58: &str = "BsnDBuxo6ivNF8nTiTXdFhy2iAcjD78TFzyxzNSQECvF";
+pub const DELEGATE_KEY_B58: &str = "q2dDTugwnDVJsCUr6BkedymEYDPr4wrJg7yGVrQ4qrY";
+pub const DELEGATE_CODE_HASH_B58: &str = "3hetpws1JsFDNS5vUfuA8AYNs2Q2fMYTxor5fyhjZ7em";
 
 /// Mailbox contract — payload-agnostic player-to-player message
 /// bus. Subscribed on connect like the presence contract.
@@ -26,8 +26,8 @@ pub const MAILBOX_CONTRACT_ID_B58: &str = "HhM5RF8fBYeb74qgHy4NYbrP1Dn2FP8WoJRsn
 pub const MAILBOX_CODE_HASH_B58: &str = "4v1GAyDKHfvo1W5eZmEzceiKDC5ZcbSr4MHHPebQE2BS";
 
 /// Guilds contract — cooperative group registry.
-pub const GUILDS_CONTRACT_ID_B58: &str = "HQ8fNWgQb25ZJbnuRAzJMmxENfdazogKSYXRbcren4XR";
-pub const GUILDS_CODE_HASH_B58: &str = "A6FdmEVMok2htAfRfqyVNLN5Mk4kFWjP5tGYttddwntW";
+pub const GUILDS_CONTRACT_ID_B58: &str = "QYbkKTefFY4XESNT63AAD1wLyQVNQEsd2RZoXVRy5ri";
+pub const GUILDS_CODE_HASH_B58: &str = "4t5NY7Tpj7vyrz7upDuL8T69Y1km2J8akMrP9nT5Y6og";
 
 /// Runtime overrides served as `./dev-keys.json` next to index.html.
 /// `scripts/dev-publish.sh` rewrites this file on every (re-)publish

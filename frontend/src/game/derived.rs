@@ -82,9 +82,17 @@ pub fn total_bonuses_from(inv: &Inventory) -> (u64, u64, u64) {
 pub fn max_hp_from(inv: &Inventory) -> u64 {
     let lvl = level_of(inv);
     let (_, _, hp_bonus) = total_bonuses_from(inv);
+    // Insight HpPerLevel — mirror of `max_hp_of` in the
+    // delegate. Frontend reads the same node level so the Hero
+    // stats panel matches the combat resolver.
+    let insight_hp = inv
+        .insight
+        .node_level(shared::InsightNode::HpPerLevel)
+        .saturating_mul(lvl);
     20u64
         .saturating_add(lvl.saturating_mul(5))
         .saturating_add(hp_bonus)
+        .saturating_add(insight_hp)
 }
 
 pub fn attack_from(inv: &Inventory) -> u64 {

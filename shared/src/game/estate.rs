@@ -114,6 +114,34 @@ pub fn estate_next_price(tier: &EstateTierDef, owned: u64) -> u64 {
 /// Cat / Dragon / Horse (see `forms.rs`); the backlog's
 /// Wolf/Bear/Eagle/Fox names are mapped here to whichever existing
 /// form fits the niche most naturally.
+/// Apply the Insight FormAffinity bias on top of the base
+/// `form_affinity_bp`. The node stretches the affinity table —
+/// every node level adds +10% to buffs (>10_000 bp) and shrinks
+/// penalties (<10_000 bp) by +5% toward neutral. Neutral
+/// affinities (Human across all tiers) stay flat regardless of
+/// node level.
+pub fn form_affinity_bp_with_insight(
+    form: u8,
+    tier_id: u8,
+    insight_form_affinity_level: u64,
+) -> u64 {
+    let base = form_affinity_bp(form, tier_id);
+    if insight_form_affinity_level == 0 || base == 10_000 {
+        return base;
+    }
+    if base > 10_000 {
+        let buff_bonus = insight_form_affinity_level.saturating_mul(1_000);
+        base.saturating_add(buff_bonus)
+    } else {
+        // Penalty side: shrink toward neutral (10_000) by 500 bp
+        // per level. Cap at 10_000 so the multiplier never
+        // crosses the neutral line — penalties should soften,
+        // never flip into a buff.
+        let penalty_relief = insight_form_affinity_level.saturating_mul(500);
+        base.saturating_add(penalty_relief).min(10_000)
+    }
+}
+
 pub fn form_affinity_bp(form: u8, tier_id: u8) -> u64 {
     match (form, tier_id) {
         // Human — balanced baseline. All tiers neutral.
