@@ -342,6 +342,15 @@ pub fn render_core(
             })
         }
     };
+    // Buy-consumable factory. Applies an optimistic local
+    // gold-debit + qty bump so the button feels instant — the
+    // delegate's authoritative response overwrites the inventory
+    // when it arrives (typically <50 ms locally, more over an SSH
+    // tunnel to a prod node). On a rejection (e.g. price changed
+    // mid-flight from a parallel call) the response's Error path
+    // doesn't ingest, but a subsequent pull-tick resyncs the
+    // inventory; the brief optimistic flicker is the cost of
+    // never blocking the click.
     let mk_buy_cb = {
         let core = core_cell.clone();
         let pending = pending.clone();
@@ -351,6 +360,31 @@ pub fn render_core(
             let pending = pending.clone();
             let bump = bump.clone();
             Callback::from(move |_| {
+                let (price, can_afford) = {
+                    let g = core.borrow();
+                    let Some(c) = g.as_ref() else { return };
+                    let price = match kind {
+                        CONSUMABLE_POTION => POTION_PRICE,
+                        CONSUMABLE_FIREBALL => FIREBALL_PRICE,
+                        _ => return,
+                    };
+                    (price, c.inventory.gold >= price)
+                };
+                if can_afford {
+                    if let Some(c) = core.borrow_mut().as_mut() {
+                        c.inventory.gold = c.inventory.gold.saturating_sub(price);
+                        match kind {
+                            CONSUMABLE_POTION => {
+                                c.inventory.potions = c.inventory.potions.saturating_add(1);
+                            }
+                            CONSUMABLE_FIREBALL => {
+                                c.inventory.fireballs = c.inventory.fireballs.saturating_add(1);
+                            }
+                            _ => {}
+                        }
+                    }
+                    bump.set(now_ms());
+                }
                 buy_item_once(core.clone(), pending.clone(), bump.clone(), kind)
             })
         }
@@ -392,7 +426,17 @@ pub fn render_core(
         let core = core_cell.clone();
         let pending = pending.clone();
         let bump = bump.clone();
-        Callback::from(move |_| work_farm_once(core.clone(), pending.clone(), bump.clone()))
+        Callback::from(move |_| {
+            // Optimistic +1 wheat — the click feels instant; the
+            // delegate's authoritative response (which carries
+            // achievement / ending side-effects) reconciles a
+            // moment later. Same pattern as the auto-toggle.
+            if let Some(c) = core.borrow_mut().as_mut() {
+                c.inventory.wheat = c.inventory.wheat.saturating_add(1);
+            }
+            bump.set(now_ms());
+            work_farm_once(core.clone(), pending.clone(), bump.clone())
+        })
     };
     let on_sell_all_wheat = {
         let core = core_cell.clone();
@@ -439,6 +483,30 @@ pub fn render_core(
             let pending = pending.clone();
             let bump = bump.clone();
             Callback::from(move |_| {
+                // Optimistic gold-debit + worker count bump so the
+                // Hire button doesn't feel mushy over a tunnelled WS.
+                // Snapshot the price under the same `tier_id`/`owned`
+                // the delegate will see — collisions with a parallel
+                // hire are ironed out on the response ingest.
+                let mutated = {
+                    let g = core.borrow();
+                    let Some(c) = g.as_ref() else { return };
+                    let Some(tier) = shared::estate_tier(tier_id) else { return };
+                    let owned = c.inventory.estate.workers_of(tier_id);
+                    let price = shared::estate_next_price(tier, owned);
+                    c.inventory.gold >= price
+                };
+                if mutated {
+                    if let Some(c) = core.borrow_mut().as_mut() {
+                        if let Some(tier) = shared::estate_tier(tier_id) {
+                            let owned = c.inventory.estate.workers_of(tier_id);
+                            let price = shared::estate_next_price(tier, owned);
+                            c.inventory.gold = c.inventory.gold.saturating_sub(price);
+                            c.inventory.estate.hire(tier_id);
+                        }
+                    }
+                    bump.set(now_ms());
+                }
                 buy_estate_worker_once(core.clone(), pending.clone(), bump.clone(), tier_id)
             })
         }
@@ -1599,6 +1667,14 @@ pub fn render_core(
                                 }) }
                             </div>
                         </section>
+                        // Per-zone activities panel (A1). Only the
+                        // activities matching `inv.current_area`
+                        // are listed; switching area clears the
+                        // active activity server-side (see
+                        // `set_area`). Picking an activity sets
+                        // `idle_action = IDLE_ACTION_ACTIVITY` and
+                        // locks out auto-mission / Estate.
+                        { render_activities_panel(c, locale, core_cell.clone(), pending.clone(), bump.clone()) }
                         <section class="panel plot">
                             <h2>{ locale.tr(MessageId::PanelPlotSoFar) }</h2>
                             <p class="chapter-no muted">{ locale.fmt_chapter(chap_no as u64) }</p>
@@ -1977,6 +2053,10 @@ pub fn render_core(
                         // Settings — the modal feel for "prestige
                         // dashboard" earns its own real estate.
                         { render_legacy_panel(c, &mk_buy_legacy_cb, on_ascend.clone()) }
+                        { render_routine_panel(c, locale, core_cell.clone(), pending.clone(), bump.clone()) }
+                        { render_insight_panel(c, locale, core_cell.clone(), pending.clone(), bump.clone()) }
+                        { render_boss_attack_panel(c, locale, core_cell.clone(), pending.clone(), bump.clone()) }
+                        { render_tokens_panel(c, locale, core_cell.clone(), pending.clone(), bump.clone()) }
                         <section class="panel settings">
                             <h2>{ locale.tr(MessageId::SettingsTitle) }</h2>
 
@@ -2250,6 +2330,344 @@ where
                     { locale.tr(MessageId::LegacyAscendBlurb) }
                 </span>
             </div>
+        </section>
+    }
+}
+
+
+/// Routine panel (B1). Per-Estate-tier headcount target. Shows
+/// "Owned / Target" with +/- buttons; setting target = 0 turns
+/// auto-hire off for that tier. Panel hides entirely until the
+/// player has at least one worker — no point cluttering Settings
+/// before Estate is on the radar.
+fn render_routine_panel(
+    c: &Core,
+    locale: Locale,
+    core_cell: CoreCell,
+    pending: PendingCell,
+    bump: yew::UseStateSetter<u64>,
+) -> Html {
+    let inv = &c.inventory;
+    let any_worker = inv.base.base.estate.workers.values().any(|n| *n > 0);
+    if !any_worker {
+        return html! {};
+    }
+    html! {
+        <section class="panel routine">
+            <h2>{ locale.tr(MessageId::PanelRoutine) }</h2>
+            <p class="muted small">{ locale.tr(MessageId::RoutineDesc) }</p>
+            <table class="legacy-grid">
+                <thead>
+                    <tr>
+                        <th>{ locale.tr(MessageId::RoutineColTier) }</th>
+                        <th class="num">{ locale.tr(MessageId::RoutineColCurrent) }</th>
+                        <th class="num">{ locale.tr(MessageId::RoutineColTarget) }</th>
+                        <th>{ "" }</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    { for shared::ESTATE_TIERS.iter().map(|tier| {
+                        let owned = inv.base.base.estate.workers_of(tier.id);
+                        let target = inv.routine.target_for(tier.id).unwrap_or(0);
+                        let cb_inc = {
+                            let core = core_cell.clone();
+                            let pending = pending.clone();
+                            let bump = bump.clone();
+                            let tid = tier.id;
+                            let next_target = target.saturating_add(1);
+                            Callback::from(move |_| {
+                                crate::freenet::actions::activity::set_routine_estate_target_once(
+                                    core.clone(), pending.clone(), bump.clone(), tid, next_target,
+                                )
+                            })
+                        };
+                        let cb_dec = {
+                            let core = core_cell.clone();
+                            let pending = pending.clone();
+                            let bump = bump.clone();
+                            let tid = tier.id;
+                            let next_target = target.saturating_sub(1);
+                            Callback::from(move |_| {
+                                crate::freenet::actions::activity::set_routine_estate_target_once(
+                                    core.clone(), pending.clone(), bump.clone(), tid, next_target,
+                                )
+                            })
+                        };
+                        html! {
+                            <tr>
+                                <td>{ tier.name }</td>
+                                <td class="num">{ owned }</td>
+                                <td class="num">{ target }</td>
+                                <td>
+                                    <button onclick={cb_dec} disabled={target == 0}>{ "−" }</button>
+                                    { " " }
+                                    <button onclick={cb_inc}>{ "+" }</button>
+                                </td>
+                            </tr>
+                        }
+                    }) }
+                </tbody>
+            </table>
+        </section>
+    }
+}
+
+/// Insight panel (B5). Compact three-row spend tree gated by
+/// owning at least 1 insight at any point (the balance might be
+/// 0 after spending — `last_awarded_mission > 0` is the better
+/// "have you ever seen this" test).
+fn render_insight_panel(
+    c: &Core,
+    locale: Locale,
+    core_cell: CoreCell,
+    pending: PendingCell,
+    bump: yew::UseStateSetter<u64>,
+) -> Html {
+    let inv = &c.inventory;
+    if inv.insight.last_awarded_mission == 0 && inv.insight.balance == 0 {
+        return html! {};
+    }
+    html! {
+        <section class="panel legacy">
+            <h2>{ locale.tr(MessageId::PanelInsight) }</h2>
+            <p class="muted small">
+                { format!("{} {} · {}", inv.insight.balance,
+                    locale.tr(MessageId::ResInsight),
+                    locale.tr(MessageId::InsightDesc)) }
+            </p>
+            <table class="legacy-grid">
+                <thead>
+                    <tr>
+                        <th>{ locale.tr(MessageId::InsightColNode) }</th>
+                        <th class="num">{ locale.tr(MessageId::InsightColLevel) }</th>
+                        <th class="num">{ locale.tr(MessageId::InsightColNextCost) }</th>
+                        <th>{ "" }</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    { for shared::InsightNode::ALL.iter().map(|node| {
+                        let lvl = inv.insight.node_level(*node);
+                        let cost = node.next_cost(lvl);
+                        let disabled = inv.insight.balance < cost;
+                        let nid = node.id();
+                        let cb = {
+                            let core = core_cell.clone();
+                            let pending = pending.clone();
+                            let bump = bump.clone();
+                            Callback::from(move |_| {
+                                crate::freenet::actions::activity::buy_insight_node_once(
+                                    core.clone(), pending.clone(), bump.clone(), nid,
+                                )
+                            })
+                        };
+                        html! {
+                            <tr>
+                                <td>{ node.name() }</td>
+                                <td class="num">{ lvl }</td>
+                                <td class="num">{ cost }</td>
+                                <td>
+                                    <button onclick={cb} disabled={disabled}>
+                                        { locale.tr(MessageId::BtnBuy) }
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    }) }
+                </tbody>
+            </table>
+        </section>
+    }
+}
+
+/// Boss-attack panel (C1). Renders the locked / unlocked state
+/// reactively — the locked variant explains the gates so the
+/// player knows what they're working toward.
+fn render_boss_attack_panel(
+    c: &Core,
+    locale: Locale,
+    core_cell: CoreCell,
+    pending: PendingCell,
+    bump: yew::UseStateSetter<u64>,
+) -> Html {
+    let inv = &c.inventory;
+    // Pre-flight mirrors the delegate `boss_attack_unlocked`.
+    let unlocked = inv.mission_count >= shared::BOSS_ATTACK_MIN_MISSIONS
+        && shared::level_of(inv) >= shared::BOSS_ATTACK_MIN_LEVEL
+        && inv.base.base.estate.workers.values().any(|n| *n > 0);
+    // Hide pre-gate; surface once the player gets close (~half
+    // missions or level).
+    if inv.mission_count < shared::BOSS_ATTACK_MIN_MISSIONS / 2 {
+        return html! {};
+    }
+    let cb = {
+        let core = core_cell.clone();
+        let pending = pending.clone();
+        let bump = bump.clone();
+        Callback::from(move |_| {
+            crate::freenet::actions::activity::boss_attack_once(
+                core.clone(), pending.clone(), bump.clone(),
+            )
+        })
+    };
+    let can_spend = inv.essence >= shared::BOSS_ATTACK_ESSENCE_COST;
+    html! {
+        <section class="panel boss">
+            <h2>{ locale.tr(MessageId::PanelBossAttack) }</h2>
+            <p class="muted small">{ locale.tr(MessageId::BossAttackDesc) }</p>
+            {
+                if !unlocked {
+                    html! { <p class="muted small">{ locale.tr(MessageId::BossAttackLocked) }</p> }
+                } else {
+                    html! {
+                        <div class="action-row">
+                            <button class="primary" onclick={cb} disabled={!can_spend}>
+                                { locale.tr(MessageId::BossAttackBtn) }
+                            </button>
+                        </div>
+                    }
+                }
+            }
+        </section>
+    }
+}
+
+/// Tokens panel (C2). Hides until the player has earned at
+/// least one token (`last_awarded_boss_damage > 0`) so the
+/// section stays out of the way until the loop is reachable.
+fn render_tokens_panel(
+    c: &Core,
+    locale: Locale,
+    core_cell: CoreCell,
+    pending: PendingCell,
+    bump: yew::UseStateSetter<u64>,
+) -> Html {
+    let inv = &c.inventory;
+    if inv.tokens.last_awarded_boss_damage == 0 && inv.tokens.balance == 0 {
+        return html! {};
+    }
+    html! {
+        <section class="panel legacy">
+            <h2>{ locale.tr(MessageId::PanelTokens) }</h2>
+            <p class="muted small">
+                { format!("{} {} · {}", inv.tokens.balance,
+                    locale.tr(MessageId::ResTokens),
+                    locale.tr(MessageId::TokensDesc)) }
+            </p>
+            <table class="legacy-grid">
+                <thead>
+                    <tr>
+                        <th>{ locale.tr(MessageId::TokenColPerk) }</th>
+                        <th class="num">{ locale.tr(MessageId::TokenColPrice) }</th>
+                        <th>{ "" }</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    { for shared::TokenPerk::ALL.iter().map(|perk| {
+                        let owned = inv.tokens.owns(*perk);
+                        let price = perk.price();
+                        let disabled = owned || inv.tokens.balance < price;
+                        let pid = perk.id();
+                        let cb = {
+                            let core = core_cell.clone();
+                            let pending = pending.clone();
+                            let bump = bump.clone();
+                            Callback::from(move |_| {
+                                crate::freenet::actions::activity::buy_token_perk_once(
+                                    core.clone(), pending.clone(), bump.clone(), pid,
+                                )
+                            })
+                        };
+                        html! {
+                            <tr>
+                                <td>{ perk.name() }</td>
+                                <td class="num">{ price }</td>
+                                <td>
+                                    <button onclick={cb} disabled={disabled}>
+                                        { if owned {
+                                            locale.tr(MessageId::TipFormAlreadyActive)
+                                        } else {
+                                            locale.tr(MessageId::BtnUnlock)
+                                        } }
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    }) }
+                </tbody>
+            </table>
+        </section>
+    }
+}
+
+/// Per-zone activities panel (A1). Lists activities whose
+/// `area_id` matches the player's current area; switching area
+/// on the World Map clears the active activity server-side via
+/// `set_area`, so this list always reflects what's available
+/// right now.
+fn render_activities_panel(
+    c: &Core,
+    locale: Locale,
+    core_cell: CoreCell,
+    pending: PendingCell,
+    bump: yew::UseStateSetter<u64>,
+) -> Html {
+    let inv = &c.inventory;
+    let lvl = shared::level_of(inv);
+    let area_activities: Vec<&shared::ActivityDef> =
+        shared::activities_for_area(inv.current_area).collect();
+    if area_activities.is_empty() {
+        return html! {};
+    }
+    let active = inv.active_activity;
+    html! {
+        <section class="panel activities">
+            <h2>{ locale.tr(MessageId::PanelActivities) }</h2>
+            <p class="muted small">{ locale.tr(MessageId::ActivitiesDesc) }</p>
+            <table class="legacy-grid">
+                <tbody>
+                    { for area_activities.iter().map(|a| {
+                        let is_active = active == a.id;
+                        let unlocked = lvl >= a.min_level;
+                        let res_label = match a.produces {
+                            shared::ActivityResource::Wheat => locale.tr(MessageId::EstateResWheat),
+                            shared::ActivityResource::Gold => locale.tr(MessageId::EstateResGold),
+                            shared::ActivityResource::Essence => locale.tr(MessageId::EstateResEssence),
+                            shared::ActivityResource::Insight => locale.tr(MessageId::ResInsight),
+                        };
+                        let next_id = if is_active { shared::ACTIVITY_NONE } else { a.id };
+                        let label = if is_active {
+                            locale.tr(MessageId::ActivityStop)
+                        } else {
+                            locale.tr(MessageId::ActivityStart)
+                        };
+                        let cb = {
+                            let core = core_cell.clone();
+                            let pending = pending.clone();
+                            let bump = bump.clone();
+                            Callback::from(move |_| {
+                                crate::freenet::actions::activity::set_activity_once(
+                                    core.clone(), pending.clone(), bump.clone(), next_id,
+                                )
+                            })
+                        };
+                        let disabled = !unlocked && !is_active;
+                        html! {
+                            <tr>
+                                <td>{ a.name }</td>
+                                <td class="num">
+                                    { format!("{}/s {}", a.yield_per_sec, res_label) }
+                                </td>
+                                <td>
+                                    <button onclick={cb} disabled={disabled}
+                                            class={if is_active { "primary" } else { "" }}>
+                                        { label }
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    }) }
+                </tbody>
+            </table>
         </section>
     }
 }

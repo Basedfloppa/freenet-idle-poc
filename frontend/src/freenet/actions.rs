@@ -7,6 +7,7 @@
 //! Submodules group the wrappers by topic — they all flat re-export
 //! through here, so call sites keep using `freenet::actions::foo`.
 
+pub mod activity;
 pub mod area;
 pub mod battle;
 pub mod dispatch;
@@ -20,6 +21,7 @@ pub mod seed;
 pub mod settings;
 pub mod shop;
 
+pub use activity::*;
 pub use area::*;
 pub use battle::*;
 pub use dispatch::*;

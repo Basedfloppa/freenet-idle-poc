@@ -75,6 +75,11 @@ pub fn run_mission(
             "Estate is the active idle action — stop it from the Estate panel to run missions.".into(),
         );
     }
+    if inv.idle_action == shared::IDLE_ACTION_ACTIVITY {
+        return Err(
+            "An activity is running — stop it from the area panel to run missions.".into(),
+        );
+    }
     crate::actions::catch_up_auto(&mut inv, now_ms);
     if inv.current_battle.is_none() {
         let _ = start_battle(&mut inv, now_ms)?;

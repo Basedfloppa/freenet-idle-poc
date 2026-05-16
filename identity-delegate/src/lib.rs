@@ -155,6 +155,23 @@ impl DelegateInterface for IdentityDelegate {
             AppRequest::BuyForm { form, now_ms } => {
                 map_inv(actions::buy_form(ctx, form, now_ms))
             }
+            AppRequest::SetActivity { activity_id, now_ms } => {
+                map_inv(actions::set_activity(ctx, activity_id, now_ms))
+            }
+            AppRequest::SetRoutineEstateTarget {
+                tier_id,
+                target,
+                now_ms,
+            } => map_inv(actions::set_routine_estate_target(
+                ctx, tier_id, target, now_ms,
+            )),
+            AppRequest::BuyInsightNode { node_id, now_ms } => {
+                map_inv(actions::buy_insight_node(ctx, node_id, now_ms))
+            }
+            AppRequest::BossAttack { now_ms } => map_inv(actions::boss_attack(ctx, now_ms)),
+            AppRequest::BuyTokenPerk { perk_id, now_ms } => {
+                map_inv(actions::buy_token_perk(ctx, perk_id, now_ms))
+            }
         };
 
         let out_envelope = DelegateEnvelopeOut {

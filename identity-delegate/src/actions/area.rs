@@ -52,6 +52,18 @@ pub fn set_area(
         }
     }
     let _ = AREAS;
+    // Drop any active per-zone activity — A1 activities are
+    // location-bound (e.g. "Mine ore" in Mountain Pass), so a
+    // zone change implicitly stops them. Tick first so the
+    // accrual for the closing window is paid out.
+    crate::actions::activity::tick_activity(&mut inv, now_ms);
+    if inv.active_activity != shared::ACTIVITY_NONE {
+        inv.active_activity = shared::ACTIVITY_NONE;
+        inv.activity_last_tick_ms = 0;
+        if inv.base.base.idle_action == shared::IDLE_ACTION_ACTIVITY {
+            inv.base.base.idle_action = shared::IDLE_ACTION_NONE;
+        }
+    }
     inv.current_area = area_id;
     inv.last_combat = None;
     save_inventory(ctx, &mut inv)?;

@@ -372,6 +372,16 @@ h3 { font-size: 0.82em; color: var(--fg-muted); margin: 1em 0 0.4em; text-transf
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 0.5em;
 }
+/* World-map title-strip override: the "currently farming: X · level
+   Y" line sits on `.panel.world-map`, whose background is the
+   accent-grass-tinted dark on the Dusk theme. The default `.muted`
+   colour (`--fg-muted`) sits too close to that hue and reads as
+   "blank space". Force a stronger foreground here so the active
+   area always reads clean against any theme. */
+.panel.world-map > p.muted {
+    color: var(--fg-soft);
+}
+
 /* Graph layout (C3a) — top-to-bottom tree. Each depth is its own
    row; areas at that depth share the row horizontally and stay
    centred so branches splay symmetrically. Each non-starter card
@@ -777,13 +787,12 @@ ul.battle-turns {
     display: flex;
     flex-direction: column;
     gap: 0.15em;
-    /* Match the mission briefing footprint (~3 wrapped lines): the
-       panel keeps a stable size whether 0 or 5 turns have landed,
-       and additional rows scroll inside instead of pushing the
-       page. Newest row sits at top of the list (caller renders
-       `iter().rev().take(5)`) so it's always visible without
-       auto-scroll plumbing. */
-    min-height: 4.5em;
+    /* Grow with the log up to ~3 rows, then scroll inside. No
+       `min-height` — the panel hugs whatever it has so an empty /
+       opening-turn state doesn't leave a reserved void between the
+       Run Mission button and the encounter ticker. Newest turn
+       sits at the top (caller renders `iter().rev().take(5)`),
+       so the visible window always shows the latest. */
     max-height: 4.5em;
     overflow-y: auto;
 }

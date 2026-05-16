@@ -54,6 +54,16 @@ pub const WHEAT_PER_GOLD: u64 = 10;
 /// induced form they didn't want; the other four are *much*
 /// more expensive because they're a strategic equip-mask + stat
 /// commitment that ICSBAH-style players will want to plan around.
+/// Personal opt-in World Boss attack constants (backlog C1).
+/// Gates intentionally lift-off after the player has demonstrably
+/// committed to the loop: 100 missions ≈ first long session,
+/// level 10 = mid-game, owning at least one Estate worker proves
+/// they've engaged with the economy spine.
+pub const BOSS_ATTACK_MIN_MISSIONS: u64 = 100;
+pub const BOSS_ATTACK_MIN_LEVEL: u64 = 10;
+pub const BOSS_ATTACK_ESSENCE_COST: u64 = 200;
+pub const BOSS_ATTACK_DAMAGE: u64 = 50;
+
 pub fn form_buy_price(form: u8) -> Option<u64> {
     use super::{FORM_CAT, FORM_DRAGON, FORM_HORSE, FORM_HUMAN, FORM_SLIME};
     match form {

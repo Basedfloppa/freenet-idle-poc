@@ -17,8 +17,8 @@ use web_sys::Response;
 pub const CONTRACT_ID_B58: &str = "27XWzSxqZeYnAULVbq1E9vnNwyhbdP6xDPWF4MmNo7vA";
 pub const CODE_HASH_B58: &str = "EUy2ppPmDXP62EkEaSttG14tUtnLc7hWSQUhHqtP2orv";
 
-pub const DELEGATE_KEY_B58: &str = "CjboHBkLGgaGYhUxfgp8zZi1moRaafE14szuiQHT2UW4";
-pub const DELEGATE_CODE_HASH_B58: &str = "ANQSq8cNc8avoapqT5rpyJtMf1QvZiLw8ep9GZGXLBjJ";
+pub const DELEGATE_KEY_B58: &str = "HJMAC1aMctW4k3y76MbAex1SQ9YcniCFLPPprto46cGa";
+pub const DELEGATE_CODE_HASH_B58: &str = "6bzccnR1DL7Fu1Z6FtvhC6rbGj4m6eQJUN7S8TA1J7sD";
 
 /// Mailbox contract — payload-agnostic player-to-player message
 /// bus. Subscribed on connect like the presence contract.

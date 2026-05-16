@@ -7,8 +7,10 @@ use shared::Inventory;
 use crate::progression::check_achievements;
 use crate::state::{enter_action, load_inventory_raw, save_inventory};
 
+use super::activity::tick_activity;
 use super::battle::catch_up_auto;
 use super::estate::tick_estate;
+use super::routine::pump_routine;
 
 /// Read-and-touch: apply HP regen, simulate any offline auto-mission
 /// ticks that elapsed since the last call, run achievement evaluation,
@@ -19,6 +21,11 @@ pub fn touch_inventory(ctx: &mut DelegateCtx, now_ms: u64) -> Result<Inventory, 
     enter_action(&mut inv, now_ms)?;
     catch_up_auto(&mut inv, now_ms);
     tick_estate(&mut inv, now_ms);
+    // Routine pump fires *after* the Estate tick so the gold
+    // accrued in the elapsed window is in the pocket before we
+    // try to spend it on auto-hires.
+    pump_routine(&mut inv);
+    tick_activity(&mut inv, now_ms);
     check_achievements(&mut inv, now_ms);
     save_inventory(ctx, &mut inv)?;
     Ok(inv)

@@ -16,6 +16,7 @@
 //! call sites that say `shared::SomeType` keep working unchanged.
 
 pub mod achievements;
+pub mod activities;
 pub mod areas;
 pub mod battle;
 pub mod combat_log;
@@ -24,16 +25,20 @@ pub mod enemies;
 pub mod estate;
 pub mod forms;
 pub mod gear;
+pub mod insight;
 pub mod inventory;
 pub mod legacy;
 pub mod plot;
 pub mod reveal;
+pub mod routine;
 pub mod shop;
 pub mod skills;
 pub mod status;
+pub mod tokens;
 pub mod xp;
 
 pub use achievements::*;
+pub use activities::*;
 pub use areas::*;
 pub use battle::*;
 pub use combat_log::*;
@@ -42,11 +47,14 @@ pub use enemies::*;
 pub use estate::*;
 pub use forms::*;
 pub use gear::*;
+pub use insight::*;
 pub use inventory::*;
 pub use legacy::*;
 pub use plot::*;
 pub use reveal::*;
+pub use routine::*;
 pub use shop::*;
 pub use skills::*;
 pub use status::*;
+pub use tokens::*;
 pub use xp::*;

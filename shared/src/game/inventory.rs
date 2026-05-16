@@ -380,10 +380,67 @@ impl From<InventoryV12> for InventoryV13 {
     }
 }
 
+/// V14 — adds per-zone activities (A1), Routine auto-hire (B1),
+/// Insight currency (B5), and Tokens (C2). Additive composition
+/// over V13, same wire-format rule as V11/V12/V13.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InventoryV14 {
+    pub base: InventoryV13,
+    /// Selected per-zone activity id; `ACTIVITY_NONE = 0` means
+    /// none chosen. Only meaningful when `idle_action ==
+    /// IDLE_ACTION_ACTIVITY`.
+    pub active_activity: u8,
+    /// Wall-clock anchor for activity accrual — analogue of
+    /// `estate.last_tick_ms`.
+    pub activity_last_tick_ms: u64,
+    pub routine: super::routine::RoutineState,
+    pub insight: super::insight::InsightState,
+    pub tokens: super::tokens::TokenState,
+}
+
+impl Default for InventoryV14 {
+    fn default() -> Self {
+        Self {
+            base: InventoryV13::default(),
+            active_activity: super::activities::ACTIVITY_NONE,
+            activity_last_tick_ms: 0,
+            routine: super::routine::RoutineState::default(),
+            insight: super::insight::InsightState::default(),
+            tokens: super::tokens::TokenState::default(),
+        }
+    }
+}
+
+impl std::ops::Deref for InventoryV14 {
+    type Target = InventoryV13;
+    fn deref(&self) -> &InventoryV13 {
+        &self.base
+    }
+}
+
+impl std::ops::DerefMut for InventoryV14 {
+    fn deref_mut(&mut self) -> &mut InventoryV13 {
+        &mut self.base
+    }
+}
+
+impl From<InventoryV13> for InventoryV14 {
+    fn from(v13: InventoryV13) -> Self {
+        Self {
+            base: v13,
+            active_activity: super::activities::ACTIVITY_NONE,
+            activity_last_tick_ms: 0,
+            routine: super::routine::RoutineState::default(),
+            insight: super::insight::InsightState::default(),
+            tokens: super::tokens::TokenState::default(),
+        }
+    }
+}
+
 /// Public name for "the current inventory shape". Every consumer
 /// imports `Inventory`; only the persistence layer in the delegate
 /// is aware that this is a versioned type.
-pub type Inventory = InventoryV13;
+pub type Inventory = InventoryV14;
 
 /// On-disk wrapper. Append new variants at the end — deleting or
 /// reordering breaks the bincode discriminant for existing blobs.
@@ -394,25 +451,31 @@ pub enum InventoryWire {
     V11(InventoryV11),
     V12(InventoryV12),
     V13(InventoryV13),
+    V14(InventoryV14),
 }
 
 impl InventoryWire {
     /// Migrate any historical variant to the current `Inventory`.
     pub fn into_latest(self) -> Inventory {
         match self {
-            Self::V9(v9) => {
-                InventoryV13::from(InventoryV12::from(InventoryV11::from(InventoryV10::from(v9))))
+            Self::V9(v9) => InventoryV14::from(InventoryV13::from(InventoryV12::from(
+                InventoryV11::from(InventoryV10::from(v9)),
+            ))),
+            Self::V10(v10) => InventoryV14::from(InventoryV13::from(InventoryV12::from(
+                InventoryV11::from(v10),
+            ))),
+            Self::V11(v11) => {
+                InventoryV14::from(InventoryV13::from(InventoryV12::from(v11)))
             }
-            Self::V10(v10) => InventoryV13::from(InventoryV12::from(InventoryV11::from(v10))),
-            Self::V11(v11) => InventoryV13::from(InventoryV12::from(v11)),
-            Self::V12(v12) => InventoryV13::from(v12),
-            Self::V13(v13) => v13,
+            Self::V12(v12) => InventoryV14::from(InventoryV13::from(v12)),
+            Self::V13(v13) => InventoryV14::from(v13),
+            Self::V14(v14) => v14,
         }
     }
 }
 
 impl From<Inventory> for InventoryWire {
     fn from(inv: Inventory) -> Self {
-        Self::V13(inv)
+        Self::V14(inv)
     }
 }

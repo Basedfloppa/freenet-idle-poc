@@ -57,10 +57,16 @@ pub fn set_idle_action(
 ) -> Result<Inventory, String> {
     let mut inv = load_inventory_raw(ctx);
     enter_action(&mut inv, now_ms)?;
-    // Drain both idle loops against the OLD setting first so we
+    // Drain all idle loops against the OLD setting first so we
     // don't lose accumulated time on a mode switch.
     crate::actions::battle::catch_up_auto(&mut inv, now_ms);
     tick_estate(&mut inv, now_ms);
+    crate::actions::activity::tick_activity(&mut inv, now_ms);
+    // Switching the idle action implicitly clears the activity
+    // slot — picking Estate or Auto-Mission shouldn't leave a
+    // dormant activity selection lurking.
+    inv.active_activity = shared::ACTIVITY_NONE;
+    inv.activity_last_tick_ms = 0;
     match action {
         IDLE_ACTION_NONE => {
             inv.base.base.auto_run_enabled = false;

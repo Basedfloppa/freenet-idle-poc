@@ -14,24 +14,34 @@
 //! Each handler follows the same pattern: load → `enter_action` →
 //! mutate → `check_achievements`/`check_endings` → save.
 
+pub mod activity;
 pub mod area;
 pub mod battle;
+pub mod boss;
 pub mod estate;
 pub mod farm;
-pub mod legacy;
 pub mod gear;
+pub mod insight;
 pub mod inventory;
+pub mod legacy;
 pub mod messaging;
 pub mod presence;
+pub mod routine;
 pub mod shop;
+pub mod tokens;
 
+pub use activity::*;
 pub use area::*;
 pub use battle::*;
+pub use boss::*;
 pub use estate::*;
 pub use farm::*;
-pub use legacy::*;
 pub use gear::*;
+pub use insight::*;
 pub use inventory::*;
+pub use legacy::*;
 pub use messaging::*;
 pub use presence::*;
+pub use routine::*;
 pub use shop::*;
+pub use tokens::*;

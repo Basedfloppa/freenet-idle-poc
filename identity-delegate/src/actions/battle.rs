@@ -22,11 +22,16 @@ pub fn set_auto_run(
     enter_action(&mut inv, now_ms)?;
     // Catch up against the OLD setting first, so toggling off
     // doesn't silently drop the last few ticks the player earned.
-    // Drain both loops since idle actions are mutually exclusive
-    // (§5.6) — flipping auto-mission also implies leaving any
-    // other idle action.
+    // Drain every idle loop since idle actions are mutually
+    // exclusive (§5.6) — flipping auto-mission implies leaving
+    // Estate / Activity too.
     catch_up_auto(&mut inv, now_ms);
     super::estate::tick_estate(&mut inv, now_ms);
+    super::activity::tick_activity(&mut inv, now_ms);
+    // Flipping auto-mission also clears any selected activity
+    // (kept symmetric with `set_idle_action`).
+    inv.active_activity = shared::ACTIVITY_NONE;
+    inv.activity_last_tick_ms = 0;
     inv.auto_run_enabled = enabled;
     inv.auto_last_tick_ms = if enabled { now_ms } else { 0 };
     inv.idle_action = if enabled {

@@ -566,6 +566,79 @@ impl Locale {
             (Self::En, MessageId::TipFormAlreadyActive) => "you are already in this form",
             (Self::Ru, MessageId::TipFormAlreadyActive) => "ты уже в этой форме",
 
+            // Activities (A1)
+            (Self::En, MessageId::PanelActivities) => "Activities",
+            (Self::Ru, MessageId::PanelActivities) => "Занятия",
+            (Self::En, MessageId::ActivitiesDesc) =>
+                "Non-combat actions tied to the current zone. Picking one sets it as your idle action — auto-mission and Estate pause until you stop.",
+            (Self::Ru, MessageId::ActivitiesDesc) =>
+                "Неборевые действия, привязанные к текущей зоне. Выбор делает занятие активным простойным действием — авто-миссия и Поместье паузятся до остановки.",
+            (Self::En, MessageId::ActivityStart) => "Start",
+            (Self::Ru, MessageId::ActivityStart) => "Начать",
+            (Self::En, MessageId::ActivityStop) => "Stop",
+            (Self::Ru, MessageId::ActivityStop) => "Остановить",
+
+            // Routine (B1)
+            (Self::En, MessageId::PanelRoutine) => "Routine",
+            (Self::Ru, MessageId::PanelRoutine) => "Распорядок",
+            (Self::En, MessageId::RoutineDesc) =>
+                "Auto-hire Estate workers up to the target count when gold permits. Capped at 50 hires per delegate tick so a fat catchup window can't drain the treasury.",
+            (Self::Ru, MessageId::RoutineDesc) =>
+                "Автоматический найм работников Поместья до целевой численности при наличии золота. Ограничено 50 наймами за один тик делегата, чтобы окно догонки не выкосило казну.",
+            (Self::En, MessageId::RoutineColTier) => "Tier",
+            (Self::Ru, MessageId::RoutineColTier) => "Звено",
+            (Self::En, MessageId::RoutineColCurrent) => "Owned",
+            (Self::Ru, MessageId::RoutineColCurrent) => "Нанято",
+            (Self::En, MessageId::RoutineColTarget) => "Target",
+            (Self::Ru, MessageId::RoutineColTarget) => "Цель",
+
+            // Insight (B5)
+            (Self::En, MessageId::PanelInsight) => "Insight",
+            (Self::Ru, MessageId::PanelInsight) => "Прозрение",
+            (Self::En, MessageId::InsightDesc) =>
+                "Rare currency. Earned every 25 missions and by the Astral 'Decode sigils' activity. Spent on small, permanent buffs.",
+            (Self::Ru, MessageId::InsightDesc) =>
+                "Редкая валюта. Капает каждые 25 миссий + от астрального занятия «Расшифровка рун». Тратится на маленькие постоянные бонусы.",
+            (Self::En, MessageId::InsightColNode) => "Node",
+            (Self::Ru, MessageId::InsightColNode) => "Узел",
+            (Self::En, MessageId::InsightColLevel) => "Level",
+            (Self::Ru, MessageId::InsightColLevel) => "Уровень",
+            (Self::En, MessageId::InsightColNextCost) => "Next cost",
+            (Self::Ru, MessageId::InsightColNextCost) => "След. цена",
+
+            // Boss attack (C1)
+            (Self::En, MessageId::PanelBossAttack) => "Personal Boss Attack",
+            (Self::Ru, MessageId::PanelBossAttack) => "Личный удар по Боссу",
+            (Self::En, MessageId::BossAttackBtn) => "Attack (-200 essence, +50 boss dmg)",
+            (Self::Ru, MessageId::BossAttackBtn) => "Атаковать (-200 эсс, +50 урон по Боссу)",
+            (Self::En, MessageId::BossAttackDesc) =>
+                "Spend essence to chip the shared World Boss outside combat. Unlocks at mission_count ≥ 100, level ≥ 10, and at least one Estate worker.",
+            (Self::Ru, MessageId::BossAttackDesc) =>
+                "Тратишь эссенцию, чтобы ударить общего Мирового Босса вне боя. Открывается при ≥ 100 миссиях, ≥ 10 уровне и хотя бы одном работнике Поместья.",
+            (Self::En, MessageId::BossAttackLocked) =>
+                "Locked — need 100 missions, level 10, and at least one Estate worker.",
+            (Self::Ru, MessageId::BossAttackLocked) =>
+                "Закрыто — нужны 100 миссий, 10 уровень и хотя бы один работник Поместья.",
+
+            // Tokens (C2)
+            (Self::En, MessageId::PanelTokens) => "Tokens",
+            (Self::Ru, MessageId::PanelTokens) => "Жетоны",
+            (Self::En, MessageId::TokensDesc) =>
+                "Earned one per 500 personal boss damage. Spent on cosmetic perks today; gameplay perks (gear slot, second auto-mission preset) unlock as their plumbing lands.",
+            (Self::Ru, MessageId::TokensDesc) =>
+                "Один жетон за каждые 500 личного урона по Боссу. Сейчас тратятся на косметические бонусы; игровые (слот, второй пресет авто-миссии) активируются по мере готовности механики.",
+            (Self::En, MessageId::TokenColPerk) => "Perk",
+            (Self::Ru, MessageId::TokenColPerk) => "Бонус",
+            (Self::En, MessageId::TokenColPrice) => "Price",
+            (Self::Ru, MessageId::TokenColPrice) => "Цена",
+            (Self::En, MessageId::BtnUnlock) => "Unlock",
+            (Self::Ru, MessageId::BtnUnlock) => "Открыть",
+
+            (Self::En, MessageId::ResInsight) => "insight",
+            (Self::Ru, MessageId::ResInsight) => "прозрения",
+            (Self::En, MessageId::ResTokens) => "tokens",
+            (Self::Ru, MessageId::ResTokens) => "жетонов",
+
             // German (C5). Selective overrides for the highest-impact
             // surface area (tabs, status pills) — anything not listed
             // falls through to English via this catch-all arm.
@@ -1414,6 +1487,34 @@ pub enum MessageId {
     FormsShopDesc,
     FormsShopBaselineDesc,
     TipFormAlreadyActive,
+
+    // Per-zone activities (A1) + Routine (B1) + Insight (B5) +
+    // Boss attack (C1) + Tokens (C2).
+    PanelActivities,
+    ActivitiesDesc,
+    ActivityStart,
+    ActivityStop,
+    PanelRoutine,
+    RoutineDesc,
+    RoutineColTier,
+    RoutineColCurrent,
+    RoutineColTarget,
+    PanelInsight,
+    InsightDesc,
+    InsightColNode,
+    InsightColLevel,
+    InsightColNextCost,
+    PanelBossAttack,
+    BossAttackBtn,
+    BossAttackDesc,
+    BossAttackLocked,
+    PanelTokens,
+    TokensDesc,
+    TokenColPerk,
+    TokenColPrice,
+    BtnUnlock,
+    ResInsight,
+    ResTokens,
 
     // Settings descriptive paragraphs (long copy that lives next to
     // each h3). Several read as inline fragments next to a <strong>

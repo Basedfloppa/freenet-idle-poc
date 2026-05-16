@@ -164,3 +164,7 @@ impl EstateState {
 pub const IDLE_ACTION_NONE: u8 = 0;
 pub const IDLE_ACTION_AUTO_MISSION: u8 = 1;
 pub const IDLE_ACTION_ESTATE: u8 = 2;
+/// Per-zone activity (A1). The actual activity id lives in
+/// `InventoryV14.active_activity`; this enum value just says
+/// "the activity slot is the active idle loop".
+pub const IDLE_ACTION_ACTIVITY: u8 = 3;

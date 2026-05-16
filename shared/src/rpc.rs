@@ -180,6 +180,31 @@ pub enum DelegateRequest {
     /// the form to `forms_visited` so first-time purchases unlock
     /// the matching skill (mirrors the defeat-based form change).
     BuyForm { form: u8, now_ms: u64 },
+    /// Pick a per-zone activity (A1). `activity_id == 0` clears
+    /// the slot; non-zero validates against the player's current
+    /// area + level via `activity_def`. Switching activities
+    /// while one is already running drains the previous tick
+    /// before swapping. Sets `idle_action = IDLE_ACTION_ACTIVITY`.
+    SetActivity { activity_id: u8, now_ms: u64 },
+    /// Set / update the desired Estate headcount for a tier (B1).
+    /// `target == 0` clears the target. Auto-hire fires when
+    /// idle = Estate and `current < target` and gold permits.
+    SetRoutineEstateTarget {
+        tier_id: u8,
+        target: u64,
+        now_ms: u64,
+    },
+    /// Spend insight to level a node (B5). Refused if balance < cost.
+    BuyInsightNode { node_id: u8, now_ms: u64 },
+    /// Personal opt-in attack on the World Boss (C1). Costs
+    /// `BOSS_ATTACK_ESSENCE_COST` essence, deals
+    /// `BOSS_ATTACK_DAMAGE` to `boss_damage`. Gated on
+    /// mission_count + level + Estate tier — see
+    /// `shared::boss_attack_unlocked`.
+    BossAttack { now_ms: u64 },
+    /// Buy a token perk (C2). One-shot; refused if already
+    /// owned or if balance is short of `TokenPerk::price`.
+    BuyTokenPerk { perk_id: u8, now_ms: u64 },
 }
 
 /// Domain split for blob-encoded persisted state. Each variant maps
