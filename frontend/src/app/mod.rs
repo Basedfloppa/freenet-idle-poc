@@ -6,6 +6,7 @@
 
 pub mod core;
 pub mod i18n;
+pub mod i18n_loader;
 pub mod i18n_shared;
 pub mod keys;
 pub mod prefs;

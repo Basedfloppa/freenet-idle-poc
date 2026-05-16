@@ -244,7 +244,7 @@ deployment uses a different invalidation path.
 - `format_si` engineering notation (`1.2k`, `200k`, `1B`) for unbounded counters
 - Debug overlay (18 lines of state diagnostics) in Settings → Advanced
 - Top-level Guilds tab (`⚔`) with create/join/leave flow
-- **Localisation**: EN + RU + FR + ES + JA (full coverage — every `MessageId`, every compound `fmt_*`, plus `i18n_shared.rs` forms/areas/enemies/skills/endings/achievements and per-locale plot word lists), plus DE (curated subset: tab labels, status pills, boot strings — DE compound `fmt_*` strings still collapse to English via `Locale::fmt_locale`). `navigator.language` auto-pick on first load; explicit picker in Settings stores `locale` short-code in the Settings blob.
+- **Localisation**: all UI strings live in `frontend/locales/<code>.json` and are bundled at compile time via `include_dir!`. Adding a new language is one JSON file drop — the locale picker auto-populates from the directory listing and falls back to English on any missing key. Current set: EN + RU + FR + ES + JA (full coverage) + DE (partial). `navigator.language` auto-pick on first load; explicit picker in Settings stores the locale's short code in the Settings blob.
 - **Build-stamped semver**: `frontend/build.rs` runs `git rev-list --count HEAD` and emits `BUILD_VERSION=major.minor.<commit_count>` as a `cargo:rustc-env`. Every push advances the version; catchup modal compares the stamp against `last_seen_version` to fire the "What's new" section even without a curated changelog entry.
 - **Reveal animation**: section slide-in plays exactly once per session — `Core::animate_reveal` carries the newly-flipped bits; render stamps `.reveal-anim` class for that single tick; subsequent tab switches see `animate_reveal == 0` and skip the animation.
 - **Equipment quality colour-coding**: equipped slots get a 4-px tier-coloured left border + tier-3/4 value-text colour; tier-4 (Legendary) also gets an inset box-shadow glow.
@@ -279,7 +279,7 @@ deployment uses a different invalidation path.
 
 **UX polish**
 - **Mobile-responsive layout** — `grid-3` collapses, but shop/buy-grid/leaderboard break on narrow viewports.
-- **Full DE translation matrix** — FR / ES / JA each have exhaustive `tr_*` tables + full compound `fmt_*` arms + i18n_shared.rs coverage. DE still has the original curated subset (tabs + pills + boot) with English fallback. A native-speaker review pass is recommended for the FR / ES / JA strings before they're treated as final copy.
+- **Full DE translation** — DE currently has only the curated subset (tabs + pills + boot strings) in `frontend/locales/de.json`. Filling out the rest is a JSON-only change — copy keys from `en.json` and translate. A native-speaker review pass is recommended for the FR / ES / JA strings before they're treated as final copy.
 - **Reactive notifications** for World Boss era advance, ending unlock.
 - **Spectator mode** — view the leaderboard without participating (maybe via `?spectate=1`).
 - **Replay shareable link** — export last_combat / boss_damage progress as a URL for sharing.

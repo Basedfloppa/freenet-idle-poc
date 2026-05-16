@@ -121,12 +121,7 @@ pub fn render_battle_turns(locale: Locale, turns: &[shared::BattleTurn]) -> Html
     }
 }
 
-/// Generic "enemy" word for the battle turns ticker. The enemy name
-/// itself (the specific monster) is locale-static in the shared crate;
-/// this method translates only the role label used in turn summaries.
+/// Generic "enemy" word used in turn-summary tickers.
 fn locale_enemy(locale: Locale) -> &'static str {
-    match locale {
-        Locale::Ru => "враг",
-        _ => "enemy",
-    }
+    locale.tr_key("term.enemy_fallback")
 }

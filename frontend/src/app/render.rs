@@ -30,7 +30,7 @@ use crate::game::derived::{
 };
 
 use super::core::{ingest_inventory, Core, ONBOARDING_STEPS};
-use super::i18n::{locale_code, locale_from_code, Locale, MessageId};
+use super::i18n::{locale_from_code, Locale, MessageId};
 
 /// Read the live `Locale` from a borrowed `CoreCell`. Used inside
 /// closures (confirm dialogs, callbacks) that fire *after* render
@@ -1089,10 +1089,13 @@ pub fn render_core(
         .unwrap_or_else(|| locale.term_never().to_string());
 
     let pubkey_text = my
-        .map(|pk| match locale.fmt_locale() {
-            Locale::En => format!("pubkey (from delegate): {}", crate::short_id(&pk)),
-            Locale::Ru => format!("ключ (от делегата): {}", crate::short_id(&pk)),
-            _ => unreachable!("fmt_locale normalises non-En/Ru locales"),
+        .map(|pk| {
+            let short = crate::short_id(&pk);
+            crate::app::i18n_loader::fmt(
+                locale.as_str(),
+                "render.pubkey_from_delegate",
+                &[("short_id", short.as_str())],
+            )
         })
         .unwrap_or_else(|| locale.tr(MessageId::TermPubkeyPending).to_string());
 
@@ -2303,27 +2306,17 @@ pub fn render_core(
 
                             <h3>{ locale.tr(MessageId::SettingsLanguage) }</h3>
                             <div class="theme-picker">
-                                { for [Locale::En, Locale::Ru, Locale::De, Locale::Fr, Locale::Es, Locale::Ja].iter().map(|loc| {
-                                    let is_active = c.prefs.locale == *loc;
+                                { for crate::app::i18n::available_locales().into_iter().map(|loc| {
+                                    let is_active = c.prefs.locale == loc;
                                     let cls = if is_active { "theme-btn active" } else { "theme-btn" };
-                                    // Render the label in its OWN
-                                    // locale (so "English" / "Русский"
-                                    // / "Deutsch" always read natively,
-                                    // never get translated). This is
-                                    // the endonym convention used by
-                                    // mainstream language pickers.
-                                    let label: &'static str = match loc {
-                                        Locale::En => "English",
-                                        Locale::Ru => "Русский",
-                                        Locale::De => "Deutsch",
-                                        Locale::Fr => "Français",
-                                        Locale::Es => "Español",
-                                        Locale::Ja => "日本語",
-                                    };
+                                    // Endonym (locale's own name) keeps the
+                                    // button readable to a speaker of that
+                                    // language regardless of current locale.
+                                    let label = loc.endonym();
                                     html! {
                                         <button
                                             class={cls}
-                                            onclick={mk_locale_cb(locale_code(*loc))}
+                                            onclick={mk_locale_cb(loc.as_str())}
                                             disabled={is_active}
                                         >
                                             { label }

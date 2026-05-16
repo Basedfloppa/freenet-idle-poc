@@ -29,17 +29,11 @@ pub fn render_achievements_tab(
             <section class="panel endings">
                 <h2>{ locale.fmt_count_of(locale.tr(MessageId::PanelEndings), inv.ending_unlocks.len(), ENDINGS_TOTAL) }</h2>
                 <p class="muted small">
-                    { match locale {
-                        Locale::Ru => "Финальные вехи. Открытие одной не прекращает прохождение — продолжай играть после любой. Достижимы в любом порядке.",
-                        _ => "Terminal-state milestones. Unlocking one doesn't end your run — keep playing past every one. Mutually reachable in any order.",
-                    } }
+                    { locale.tr_key("achievements.endings_intro") }
                 </p>
                 {
                     if inv.ending_unlocks.is_empty() {
-                        html! { <p class="muted">{ match locale {
-                            Locale::Ru => "финалов пока нет — самый простой Пилигрим: посети все 5 форм",
-                            _ => "no endings unlocked yet — Pilgrim is the easiest: visit all 5 forms",
-                        } }</p> }
+                        html! { <p class="muted">{ locale.tr_key("achievements.endings_empty") }</p> }
                     } else {
                         html! {
                             <ul class="ending-list">
@@ -63,17 +57,11 @@ pub fn render_achievements_tab(
                     locale.fmt_count_of(locale.tr(MessageId::PanelFormsVisited), inv.forms_visited.len(), 5),
                 ) }</h2>
                 <p class="muted small">
-                    { match locale {
-                        Locale::Ru => "Навыки — постоянные пассивные бонусы. Каждая принятая форма оставляет свой след — он не сбрасывается при возврате. Уровни 10 и 20 открывают вехи ветерана.",
-                        _ => "Skills are permanent passive bonuses. Each form you've taken leaves a mark on you — they don't reset when you change back. Level 10 and 20 unlock veteran milestones.",
-                    } }
+                    { locale.tr_key("achievements.skills_intro") }
                 </p>
                 {
                     if inv.skills_unlocked.is_empty() {
-                        html! { <p class="muted">{ match locale {
-                            Locale::Ru => "пока без навыков — проиграй не-Человеку, чтобы выучить первый",
-                            _ => "no skills yet — lose to a non-Human enemy to learn one",
-                        } }</p> }
+                        html! { <p class="muted">{ locale.tr_key("achievements.skills_empty") }</p> }
                     } else {
                         html! {
                             <ul class="skill-list">
@@ -123,42 +111,32 @@ pub fn render_achievements_tab(
                 <h2>{ locale.fmt_count_of(locale.tr(MessageId::PanelAchievementsLow), inv.achievement_unlocks.len(), ACHIEVEMENT_TABLE.len()) }</h2>
                 {
                     if inv.achievement_unlocks.is_empty() {
-                        html! { <p class="muted">{ match locale {
-                            Locale::Ru => "значков ещё нет — запусти миссию",
-                            _ => "no badges yet — run a mission to start",
-                        } }</p> }
+                        html! { <p class="muted">{ locale.tr_key("achievements.list_empty") }</p> }
                     } else {
                         html! {
                             <div class="badges">
                                 { for ACHIEVEMENT_TABLE.iter().filter_map(|(id, _)| {
                                     inv.achievement_unlocks.get(id).map(|ts| {
                                         let age = now.saturating_sub(*ts);
-                                        let age_str = match locale {
-                                            Locale::Ru => {
-                                                if age < 60_000 {
-                                                    format!("{} с назад", age / 1000)
-                                                } else if age < 3_600_000 {
-                                                    format!("{} мин назад", age / 60_000)
-                                                } else {
-                                                    format!("{} ч назад", age / 3_600_000)
-                                                }
-                                            }
-                                            _ => {
-                                                if age < 60_000 {
-                                                    format!("{}s ago", age / 1000)
-                                                } else if age < 3_600_000 {
-                                                    format!("{}m ago", age / 60_000)
-                                                } else {
-                                                    format!("{}h ago", age / 3_600_000)
-                                                }
-                                            }
+                                        let age_str = if age < 60_000 {
+                                            locale.fmt_seconds_ago(age / 1000)
+                                        } else if age < 3_600_000 {
+                                            let v = (age / 60_000).to_string();
+                                            crate::app::i18n_loader::fmt(
+                                                locale.as_str(),
+                                                "fmt.minutes_ago",
+                                                &[("n", v.as_str())],
+                                            )
+                                        } else {
+                                            let v = (age / 3_600_000).to_string();
+                                            crate::app::i18n_loader::fmt(
+                                                locale.as_str(),
+                                                "fmt.hours_ago",
+                                                &[("n", v.as_str())],
+                                            )
                                         };
-                                        // Tooltip = unlock criterion + when. Hover
-                                        // shows what you did to get it.
-                                        let unlocked_prefix = match locale {
-                                            Locale::Ru => "Открыто",
-                                            _ => "Unlocked",
-                                        };
+                                        let unlocked_prefix =
+                                            locale.tr_key("term.unlocked");
                                         let tooltip = format!(
                                             "{}\n{unlocked_prefix} {age_str}",
                                             i18n_shared::achievement_reason(locale, *id)

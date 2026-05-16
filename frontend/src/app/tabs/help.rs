@@ -1,11 +1,5 @@
-//! Help-tab content. Pure static text — no callbacks, no inventory
-//! references; just the in-app reference card for new players.
-//!
-//! The visible copy is pulled from `i18n::HelpBody` so the whole tab
-//! mirrors the user's selected locale. Inline `<strong>` markers are
-//! intentionally not preserved across translation: doing so would
-//! require shipping HTML through `dangerously_set_inner_html`, which
-//! isn't worth it for a printed reference.
+//! Help-tab content. Pure static text driven by `i18n::HelpBody`,
+//! which loads its fields from the active locale's JSON.
 
 use yew::prelude::*;
 

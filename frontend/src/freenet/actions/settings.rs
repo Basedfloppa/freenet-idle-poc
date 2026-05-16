@@ -155,7 +155,7 @@ pub fn save_settings_once(
                 None
             }
         });
-        let locale = locale_override.or_else(|| Some(locale_code(c.prefs.locale).to_string()));
+        let locale = locale_override.or_else(|| Some(locale_code(&c.prefs.locale).to_string()));
         let last_seen_version = last_seen_version_override.or_else(|| c.last_seen_version.clone());
         let last_catchup_acked_started_ms = last_catchup_acked_override
             .map(Some)
