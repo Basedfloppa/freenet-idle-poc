@@ -63,6 +63,22 @@ impl LegacyNode {
         }
     }
 
+    /// One-line description of what the node does. Plain text so
+    /// it can be embedded in a tooltip or as a `<p class="muted
+    /// small">` alongside the table. Magnitudes are read off
+    /// `bp_per_level` directly so docs can't drift from the
+    /// implementation.
+    pub fn description(self) -> &'static str {
+        match self {
+            LegacyNode::HeroAttack =>
+                "Multiplies hero base + bonus attack by +5% per level. Stacks multiplicatively after gear / form / skill bonuses.",
+            LegacyNode::EstateYield =>
+                "Multiplies Estate worker yield by +10% per level. Compounds with form affinity multiplicatively.",
+            LegacyNode::MissionGold =>
+                "Multiplies gold gained per encounter by +5% per level. Applies to RunMission and auto-mission wins alike.",
+        }
+    }
+
     /// Per-level multiplier in basis points. Stacked additively
     /// against 10_000 (×1.0); a HeroAttack at level 4 contributes
     /// `4 * 500 = 2_000` bp → ×1.20.

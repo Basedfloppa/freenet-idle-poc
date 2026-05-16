@@ -86,16 +86,18 @@ where
 /// Lives on the Shop tab — that's the inventory-management hub: you
 /// look at the stash, equip what you want, forge duplicates into
 /// the next tier, dump the rest for gold.
-pub fn render_stash_grouped<E, S, F>(
+pub fn render_stash_grouped<E, S, SA, F>(
     locale: Locale,
     inv: &Inventory,
     mk_equip: &E,
     mk_sell: &S,
+    mk_sell_all: &SA,
     mk_forge: &F,
 ) -> Html
 where
     E: Fn(u16) -> Callback<MouseEvent>,
     S: Fn(u16) -> Callback<MouseEvent>,
+    SA: Fn(u16) -> Callback<MouseEvent>,
     F: Fn(u16) -> Callback<MouseEvent>,
 {
     if inv.unequipped.is_empty() {
@@ -139,7 +141,7 @@ where
                         <div class="stash-items">
                             { for distinct.iter().map(|cid| {
                                 let count = *counts_by_id.get(cid).unwrap_or(&0);
-                                render_stash_row(locale, *cid, count, inv.essence, mk_equip, mk_sell, mk_forge)
+                                render_stash_row(locale, *cid, count, inv.essence, mk_equip, mk_sell, mk_sell_all, mk_forge)
                             }) }
                         </div>
                     </div>
@@ -154,18 +156,20 @@ where
 /// Forge button only renders when ≥ FORGE_COUNT copies are owned
 /// AND the item isn't already at the max tier; greyed out if
 /// essence is insufficient.
-pub fn render_stash_row<E, S, F>(
+pub fn render_stash_row<E, S, SA, F>(
     locale: Locale,
     catalog_id: u16,
     owned_count: usize,
     essence: u64,
     mk_equip: &E,
     mk_sell: &S,
+    mk_sell_all: &SA,
     mk_forge: &F,
 ) -> Html
 where
     E: Fn(u16) -> Callback<MouseEvent>,
     S: Fn(u16) -> Callback<MouseEvent>,
+    SA: Fn(u16) -> Callback<MouseEvent>,
     F: Fn(u16) -> Callback<MouseEvent>,
 {
     let Some(t) = gear_template(catalog_id) else {
@@ -190,29 +194,45 @@ where
             </span>
             <span class="stash-tier">{ format!("T{}", t.tier) }</span>
             <span class="stash-stats muted small">{ stat_blurb(&t) }</span>
-            <button class="stash-equip" onclick={mk_equip(catalog_id)}>{ locale.tr(MessageId::BtnEquip) }</button>
-            <button class="stash-sell" onclick={mk_sell(catalog_id)} title={format!("sell for {sell_price} gold")}>
-                { format!("sell {sell_price}g") }
-            </button>
-            {
-                if forge_available {
-                    let title = if !forge_enough_copies {
-                        format!("need {} copies (have {})", FORGE_COUNT, owned_count)
-                    } else if !forge_enough_essence {
-                        format!("need {forge_cost} essence (have {essence})")
-                    } else {
-                        format!("forge {} copies + {forge_cost} essence → 1 T{}", FORGE_COUNT, t.tier + 1)
-                    };
-                    html! {
-                        <button class="stash-forge" disabled={forge_disabled}
-                                onclick={mk_forge(catalog_id)} title={title}>
-                            { format!("forge {forge_cost}e") }
-                        </button>
-                    }
-                } else {
-                    html! { <span class="stash-forge-na muted small">{ locale.tr(MessageId::TermMaxTier) }</span> }
+            <div class="stash-actions">
+                <button class="stash-equip" onclick={mk_equip(catalog_id)}>{ locale.tr(MessageId::BtnEquip) }</button>
+                <button class="stash-sell" onclick={mk_sell(catalog_id)} title={format!("sell for {sell_price} gold")}>
+                    { format!("sell {sell_price}g") }
+                </button>
+                {
+                    // Bulk-sell only renders for multi-copy rows so
+                    // the single-item card stays compact. Reads
+                    // `sell ×N (total g)`.
+                    if owned_count > 1 {
+                        let total = sell_price.saturating_mul(owned_count as u64);
+                        html! {
+                            <button class="stash-sell" onclick={mk_sell_all(catalog_id)}
+                                    title={format!("sell all {} copies for {total} gold", owned_count)}>
+                                { format!("sell ×{} ({total}g)", owned_count) }
+                            </button>
+                        }
+                    } else { html! {} }
                 }
-            }
+                {
+                    if forge_available {
+                        let title = if !forge_enough_copies {
+                            format!("need {} copies (have {})", FORGE_COUNT, owned_count)
+                        } else if !forge_enough_essence {
+                            format!("need {forge_cost} essence (have {essence})")
+                        } else {
+                            format!("forge {} copies + {forge_cost} essence → 1 T{}", FORGE_COUNT, t.tier + 1)
+                        };
+                        html! {
+                            <button class="stash-forge" disabled={forge_disabled}
+                                    onclick={mk_forge(catalog_id)} title={title}>
+                                { format!("forge {forge_cost}e") }
+                            </button>
+                        }
+                    } else {
+                        html! { <span class="stash-forge-na muted small">{ locale.tr(MessageId::TermMaxTier) }</span> }
+                    }
+                }
+            </div>
         </div>
     }
 }

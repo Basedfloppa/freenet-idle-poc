@@ -85,6 +85,34 @@ pub fn sell_gear(
     Ok(inv)
 }
 
+/// Bulk-sell every copy of `catalog_id` currently in the stash.
+/// One delegate round-trip instead of N — designed for the
+/// "I have 50 Worn Helms, just liquidate the lot" case.
+/// Atomicity: either all copies are removed and the matching
+/// gold credited, or the call fails up-front (unknown id /
+/// nothing in stash); no partial-sale state is ever persisted.
+pub fn sell_gear_all(
+    ctx: &mut DelegateCtx,
+    catalog_id: u16,
+    now_ms: u64,
+) -> Result<Inventory, String> {
+    let mut inv = load_inventory_raw(ctx);
+    enter_action(&mut inv, now_ms)?;
+    let tmpl = gear_template(catalog_id)
+        .ok_or_else(|| format!("unknown gear id {catalog_id}"))?;
+    let count_before = inv.unequipped.iter().filter(|c| **c == catalog_id).count();
+    if count_before == 0 {
+        return Err(format!("gear {catalog_id} not in stash"));
+    }
+    inv.unequipped.retain(|c| *c != catalog_id);
+    let unit_price = gear_sell_price(tmpl.tier);
+    let total = unit_price.saturating_mul(count_before as u64);
+    inv.gold = inv.gold.saturating_add(total);
+    check_achievements(&mut inv, now_ms);
+    save_inventory(ctx, &mut inv)?;
+    Ok(inv)
+}
+
 pub fn forge_upgrade(
     ctx: &mut DelegateCtx,
     catalog_id: u16,

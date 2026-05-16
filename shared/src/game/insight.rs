@@ -60,6 +60,17 @@ impl InsightNode {
         }
     }
 
+    pub fn description(self) -> &'static str {
+        match self {
+            InsightNode::HpPerLevel =>
+                "Adds 1 HP per hero level per node level. Stacks on top of the base 5 HP/lvl curve, so it's most effective in the late game.",
+            InsightNode::GoldDropPct =>
+                "Adds 1% per node level to every encounter's gold reward. Compounds multiplicatively with Legacy MissionGold and area gold_mult.",
+            InsightNode::FormAffinity =>
+                "Stretches the current form's Estate-tier affinity table — buffs grow by +10% per node level, penalties shrink by +5%. Encourages specialisation.",
+        }
+    }
+
     /// Cost in insight for the *next* level. Linear in node level
     /// for the first ~10 levels, then sublinear cap. Insight is
     /// rare, so we don't need an exponential curve.

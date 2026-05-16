@@ -172,6 +172,9 @@ impl DelegateInterface for IdentityDelegate {
             AppRequest::BuyTokenPerk { perk_id, now_ms } => {
                 map_inv(actions::buy_token_perk(ctx, perk_id, now_ms))
             }
+            AppRequest::SellGearAll { catalog_id, now_ms } => {
+                map_inv(actions::sell_gear_all(ctx, catalog_id, now_ms))
+            }
         };
 
         let out_envelope = DelegateEnvelopeOut {

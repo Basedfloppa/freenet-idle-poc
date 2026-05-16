@@ -7,7 +7,7 @@
 
 use freenet_stdlib::prelude::*;
 
-use shared::{estate_next_price, estate_tier, Inventory, IDLE_ACTION_ESTATE};
+use shared::{estate_next_price, estate_tier, Inventory};
 
 use crate::state::{enter_action, load_inventory_raw, save_inventory};
 
@@ -34,8 +34,16 @@ pub fn set_routine_estate_target(
 /// elapsed window is already in the pocket when we try to spend
 /// it. Bounded by an explicit per-call cap so a fat catchup
 /// window can't burn through the entire treasury in one tick.
+///
+/// **No idle-action gate.** Setting a routine target is an
+/// explicit "spend my gold on this whenever it's available"
+/// signal; restricting auto-hire to Estate-idle would mean a
+/// player accumulating gold from auto-mission can't ever clear
+/// a Sage target without manually switching idle modes. Cheaper
+/// for the player to just configure targets and let income from
+/// any source drain into them.
 pub fn pump_routine(inv: &mut Inventory) {
-    if inv.base.base.idle_action != IDLE_ACTION_ESTATE {
+    if inv.routine.estate_targets.is_empty() {
         return;
     }
     // Cheap cap: at most N hires per pump so a 1-hour catchup

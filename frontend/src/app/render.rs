@@ -288,6 +288,24 @@ pub fn render_core(
             })
         }
     };
+    // Bulk-sell factory: one click drops every copy of a single
+    // `catalog_id` in the stash for `count × tier_price` gold.
+    // Saves the player from clicking sell 50× on identical drops.
+    let mk_sell_all_cb = {
+        let core = core_cell.clone();
+        let pending = pending.clone();
+        let bump = bump.clone();
+        move |catalog_id: u16| {
+            let core = core.clone();
+            let pending = pending.clone();
+            let bump = bump.clone();
+            Callback::from(move |_| {
+                crate::freenet::actions::gear::sell_gear_all_once(
+                    core.clone(), pending.clone(), bump.clone(), catalog_id,
+                )
+            })
+        }
+    };
     let mk_forge_cb = {
         let core = core_cell.clone();
         let pending = pending.clone();
@@ -1050,6 +1068,12 @@ pub fn render_core(
     // higher than the currently-equipped one. Keeps the button's
     // visual state honest — pressing it would have been a no-op
     // otherwise.
+    // The manual "+1 wheat" Work Farm button is hidden once any
+    // Estate Farmhand worker exists — they produce wheat
+    // passively at a much higher rate and the manual click
+    // would feel like a no-op. New players without a Farmhand
+    // still get the original click-to-farm path.
+    let farmhand_active = inv.base.base.estate.workers_of(0) > 0;
     let auto_equip_can_improve = crate::game::derived::auto_equip_would_change(inv);
     let auto_equip_tip: String = if auto_equip_can_improve {
         locale.tr(MessageId::TipAutoEquipBest).to_string()
@@ -1177,6 +1201,19 @@ pub fn render_core(
                         Tab::Shop => inv.revealed_has(shared::RevealKey::Shop),
                         Tab::Guilds => inv.revealed_has(shared::RevealKey::Guilds),
                         Tab::Achievements => inv.revealed_has(shared::RevealKey::Achievements),
+                        // Mastery surfaces once the player has earned
+                        // their first Legacy star — that's the same
+                        // reveal that used to render the Legacy
+                        // panel inside Settings.
+                        Tab::Mastery => {
+                            inv.legacy.stars > 0
+                                || !inv.legacy.nodes.is_empty()
+                                || inv.legacy.ascend_count > 0
+                                || inv.insight.last_awarded_mission > 0
+                                || inv.tokens.last_awarded_boss_damage > 0
+                                || inv.mission_count >= shared::BOSS_ATTACK_MIN_MISSIONS / 2
+                                || inv.base.base.estate.workers.values().any(|n| *n > 0)
+                        }
                     }
                 }).map(|(icon, label, tab)| {
                     let is_active = c.current_tab == *tab;
@@ -1185,7 +1222,7 @@ pub fn render_core(
                         Tab::Shop => anim_cls(shared::RevealKey::Shop),
                         Tab::Guilds => anim_cls(shared::RevealKey::Guilds),
                         Tab::Achievements => anim_cls(shared::RevealKey::Achievements),
-                        Tab::Farm | Tab::Settings | Tab::Help => "",
+                        Tab::Farm | Tab::Settings | Tab::Help | Tab::Mastery => "",
                     };
                     let cls = classes!(
                         "icon-btn",
@@ -1787,7 +1824,7 @@ pub fn render_core(
                             <p class="muted small">
                                 { locale.tr(MessageId::ShopStashDesc) }
                             </p>
-                            { render_stash_grouped(locale, inv, &mk_equip_cb, &mk_sell_cb, &mk_forge_cb) }
+                            { render_stash_grouped(locale, inv, &mk_equip_cb, &mk_sell_cb, &mk_sell_all_cb, &mk_forge_cb) }
                         </section>
 
                         <section class="panel buy-gear">
@@ -1858,10 +1895,27 @@ pub fn render_core(
                             </ul>
                         </section>
 
+                        // Wheat panel (post-rework): kept as the
+                        // wheat → gold exchange + balance readout.
+                        // The manual "+1 wheat" click is hidden
+                        // once any Estate Farmhand exists because
+                        // workers produce wheat passively at a
+                        // higher rate — the click would be a
+                        // misleading no-op compared to the loop
+                        // already running. We keep the button for
+                        // brand-new players who haven't bought a
+                        // worker yet so they have *something* to
+                        // do for wheat before the Estate reveal.
                         <section class="panel farm">
                             <h2>{ locale.tr(MessageId::PanelFarm) }</h2>
                             <p class="muted small">
-                                { locale.tr(MessageId::ShopFarmDesc) }
+                                {
+                                    if farmhand_active {
+                                        locale.tr(MessageId::ShopFarmDescPassive)
+                                    } else {
+                                        locale.tr(MessageId::ShopFarmDesc)
+                                    }
+                                }
                             </p>
                             <p>
                                 { locale.fmt_wheat_balance(
@@ -1870,7 +1924,17 @@ pub fn render_core(
                                 ) }
                             </p>
                             <div class="action-row">
-                                <button onclick={on_work_farm}>{ locale.tr(MessageId::BtnWorkFarm) }</button>
+                                {
+                                    if farmhand_active {
+                                        html! {}
+                                    } else {
+                                        html! {
+                                            <button onclick={on_work_farm}>
+                                                { locale.tr(MessageId::BtnWorkFarm) }
+                                            </button>
+                                        }
+                                    }
+                                }
                                 <button
                                     onclick={on_sell_all_wheat}
                                     disabled={inv.wheat < WHEAT_PER_GOLD}
@@ -2045,6 +2109,21 @@ pub fn render_core(
                     locale, inv, now, boss_era, boss_hp, boss_max_hp, boss_pct, total_dmg, &rows,
                 ),
                 Tab::Help => crate::app::tabs::render_help_tab(locale),
+                Tab::Mastery => html! {
+                    <>
+                        <section class="panel mastery-intro">
+                            <h2>{ locale.tr(MessageId::TabMastery) }</h2>
+                            <p class="muted small">
+                                { locale.tr(MessageId::MasteryIntro) }
+                            </p>
+                        </section>
+                        { render_legacy_panel(c, &mk_buy_legacy_cb, on_ascend.clone()) }
+                        { render_routine_panel(c, locale, core_cell.clone(), pending.clone(), bump.clone()) }
+                        { render_insight_panel(c, locale, core_cell.clone(), pending.clone(), bump.clone()) }
+                        { render_boss_attack_panel(c, locale, core_cell.clone(), pending.clone(), bump.clone()) }
+                        { render_tokens_panel(c, locale, core_cell.clone(), pending.clone(), bump.clone()) }
+                    </>
+                },
                 Tab::Settings => html! {
                     <>
                         // Legacy / Epoch panel (backlog C1). Shows
@@ -2052,11 +2131,6 @@ pub fn render_core(
                         // the Ascend control. Always visible on
                         // Settings — the modal feel for "prestige
                         // dashboard" earns its own real estate.
-                        { render_legacy_panel(c, &mk_buy_legacy_cb, on_ascend.clone()) }
-                        { render_routine_panel(c, locale, core_cell.clone(), pending.clone(), bump.clone()) }
-                        { render_insight_panel(c, locale, core_cell.clone(), pending.clone(), bump.clone()) }
-                        { render_boss_attack_panel(c, locale, core_cell.clone(), pending.clone(), bump.clone()) }
-                        { render_tokens_panel(c, locale, core_cell.clone(), pending.clone(), bump.clone()) }
                         <section class="panel settings">
                             <h2>{ locale.tr(MessageId::SettingsTitle) }</h2>
 
@@ -2309,8 +2383,11 @@ where
                             (mult_bp % 10_000) / 100,
                         );
                         html! {
-                            <tr>
-                                <td>{ node.name() }</td>
+                            <tr title={node.description()}>
+                                <td>
+                                    <div>{ node.name() }</div>
+                                    <div class="muted small">{ node.description() }</div>
+                                </td>
                                 <td class="num">{ lvl }</td>
                                 <td class="num">{ mult_label }</td>
                                 <td class="num">{ format!("{}★", cost) }</td>
@@ -2461,8 +2538,11 @@ fn render_insight_panel(
                             })
                         };
                         html! {
-                            <tr>
-                                <td>{ node.name() }</td>
+                            <tr title={node.description()}>
+                                <td>
+                                    <div>{ node.name() }</div>
+                                    <div class="muted small">{ node.description() }</div>
+                                </td>
                                 <td class="num">{ lvl }</td>
                                 <td class="num">{ cost }</td>
                                 <td>
@@ -2578,8 +2658,11 @@ fn render_tokens_panel(
                             })
                         };
                         html! {
-                            <tr>
-                                <td>{ perk.name() }</td>
+                            <tr title={perk.description()}>
+                                <td>
+                                    <div>{ perk.name() }</div>
+                                    <div class="muted small">{ perk.description() }</div>
+                                </td>
                                 <td class="num">{ price }</td>
                                 <td>
                                     <button onclick={cb} disabled={disabled}>

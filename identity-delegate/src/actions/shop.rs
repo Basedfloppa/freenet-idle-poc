@@ -117,6 +117,11 @@ pub fn buy_form(ctx: &mut DelegateCtx, form: u8, now_ms: u64) -> Result<Inventor
     inv.gold -= price;
     inv.current_form = form;
     inv.forms_visited.entry(form).or_insert(now_ms);
+    // Same housekeeping as the defeat-induced transformation:
+    // disallowed slots move their gear back into the stash so a
+    // Slime doesn't keep a Pants slot equipped. The shop path
+    // used to skip this and left ghost gear in place.
+    crate::combat::enforce_form_slot_mask(&mut inv);
     inv.current_hp = max_hp_of(&inv);
     check_achievements(&mut inv, now_ms);
     check_endings(&mut inv, now_ms, None);

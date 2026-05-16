@@ -1344,19 +1344,38 @@ ul.ending-list { list-style: none; padding: 0; margin: 0.4em 0; display: flex; f
     font-weight: 600;
 }
 .stash-items {
-    display: flex;
-    flex-direction: column;
-    gap: 0.2em;
+    /* Multi-column grid: each card is ≥280px wide so name +
+       stats + action buttons stay readable, and the listing
+       packs wider when the panel has room. Replaces the
+       previous single-column flex layout — a 30-item stash
+       fits in a few rows instead of scrolling forever. */
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 0.3em;
 }
 .stash-item {
     display: grid;
-    grid-template-columns: minmax(0, 1.4fr) auto minmax(0, 1.8fr) auto auto;
-    gap: 0.4em;
-    align-items: center;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+        "name tier"
+        "stats stats"
+        "actions actions";
+    gap: 0.15em 0.4em;
     background: var(--bg-card);
     border: 1px solid var(--border-soft);
     border-radius: 4px;
-    padding: 0.3em 0.5em;
+    padding: 0.35em 0.55em;
+    font-size: 0.85em;
+}
+.stash-item .stash-name { grid-area: name; }
+.stash-item .stash-tier { grid-area: tier; justify-self: end; }
+.stash-item .stash-stats { grid-area: stats; line-height: 1.2; }
+.stash-item .stash-actions {
+    grid-area: actions;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25em;
+    align-items: center;
 }
 .stash-item.tier-1 { border-left: 3px solid var(--tier-1); }
 .stash-item.tier-2 { border-left: 3px solid var(--tier-2); }

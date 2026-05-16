@@ -150,6 +150,13 @@ pub fn save_inventory(ctx: &mut DelegateCtx, inv: &mut Inventory) -> Result<(), 
     crate::actions::legacy::award_pending_stars(inv);
     crate::actions::insight::award_pending_insight(inv);
     crate::actions::tokens::award_pending_tokens(inv);
+    // Pump routine auto-hire here, not just from
+    // `touch_inventory`. A player running auto-mission earns
+    // gold inside `run_mission`/`tick_only` and never hits the
+    // pull-tick path while a battle is running — the previous
+    // wiring left their Routine targets dormant for minutes. The
+    // pump is cheap (no targets → no-op) and idempotent.
+    crate::actions::routine::pump_routine(inv);
     let wire = InventoryWire::from(inv.clone());
     let bytes = bincode::serialize(&wire).map_err(|e| format!("ser inventory: {e}"))?;
     if !ctx.set_secret(INVENTORY_SECRET_ID, &bytes) {

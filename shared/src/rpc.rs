@@ -205,6 +205,12 @@ pub enum DelegateRequest {
     /// Buy a token perk (C2). One-shot; refused if already
     /// owned or if balance is short of `TokenPerk::price`.
     BuyTokenPerk { perk_id: u8, now_ms: u64 },
+    /// Sell every copy of `catalog_id` in the stash atomically.
+    /// One RPC instead of N — saves the player from click-spam
+    /// when liquidating 50 identical low-tier drops. Returns the
+    /// post-mutation inventory with `count × gear_sell_price(tier)`
+    /// gold added and the rows removed from `unequipped`.
+    SellGearAll { catalog_id: u16, now_ms: u64 },
 }
 
 /// Domain split for blob-encoded persisted state. Each variant maps

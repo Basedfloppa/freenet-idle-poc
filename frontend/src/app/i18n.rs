@@ -98,6 +98,8 @@ impl Locale {
             (Self::Ru, MessageId::TabGuilds) => "Гильдии",
             (Self::En, MessageId::TabAchievements) => "Achievements",
             (Self::Ru, MessageId::TabAchievements) => "Достижения",
+            (Self::En, MessageId::TabMastery) => "Mastery",
+            (Self::Ru, MessageId::TabMastery) => "Мастерство",
             (Self::En, MessageId::TabSettings) => "Settings",
             (Self::Ru, MessageId::TabSettings) => "Настройки",
             (Self::En, MessageId::TabHelp) => "Help",
@@ -472,6 +474,8 @@ impl Locale {
             (Self::Ru, MessageId::ShopSageDesc) => "Мудрец меняет постоянные знания навыков на эссенцию. Ветеран/Чемпион по-прежнему открываются за уровни — их купить нельзя.",
             (Self::En, MessageId::ShopFarmDesc) => "safe non-combat income. each Work click yields +1 wheat; the merchant pays 1 gold per 10 wheat.",
             (Self::Ru, MessageId::ShopFarmDesc) => "безопасный доход без боя. Каждое нажатие «Работа» приносит +1 пшеницы; купец платит 1 золото за 10 пшеницы.",
+            (Self::En, MessageId::ShopFarmDescPassive) => "your Estate Farmhand workers now produce wheat passively — the merchant still buys it at 1 gold per 10.",
+            (Self::Ru, MessageId::ShopFarmDescPassive) => "работники-крестьяне твоего Поместья теперь приносят пшеницу пассивно — купец по-прежнему берёт её по 1 золоту за 10.",
 
             // ── Help-tab subheaders & sections ──
             (Self::En, MessageId::HelpTheLoop) => "the loop",
@@ -638,6 +642,10 @@ impl Locale {
             (Self::Ru, MessageId::ResInsight) => "прозрения",
             (Self::En, MessageId::ResTokens) => "tokens",
             (Self::Ru, MessageId::ResTokens) => "жетонов",
+            (Self::En, MessageId::MasteryIntro) =>
+                "Permanent upgrades — bought once, kept forever. Legacy stars come from level milestones; Insight from missions and Astral activities; Tokens from personal boss damage. Routine targets and the World Boss Attack live here too.",
+            (Self::Ru, MessageId::MasteryIntro) =>
+                "Постоянные улучшения — покупаются один раз, остаются навсегда. Звёзды Наследия — за уровни; Прозрение — за миссии и астральные занятия; Жетоны — за личный урон по Боссу. Цели Распорядка и Удар по Мировому Боссу — тоже здесь.",
 
             // German (C5). Selective overrides for the highest-impact
             // surface area (tabs, status pills) — anything not listed
@@ -1281,6 +1289,7 @@ pub enum MessageId {
     TabShop,
     TabGuilds,
     TabAchievements,
+    TabMastery,
     TabSettings,
     TabHelp,
 
@@ -1515,6 +1524,7 @@ pub enum MessageId {
     BtnUnlock,
     ResInsight,
     ResTokens,
+    MasteryIntro,
 
     // Settings descriptive paragraphs (long copy that lives next to
     // each h3). Several read as inline fragments next to a <strong>
@@ -1551,6 +1561,7 @@ pub enum MessageId {
     ShopBuyGearDesc,
     ShopSageDesc,
     ShopFarmDesc,
+    ShopFarmDescPassive,
 
     // Hover tooltips on buttons / icons.
     TipFightInProgress,

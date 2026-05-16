@@ -55,6 +55,23 @@ pub fn sell_gear_once(
     );
 }
 
+/// Bulk-sell every copy of `catalog_id` in the stash.
+pub fn sell_gear_all_once(
+    core: CoreCell,
+    pending: PendingCell,
+    bump: UseStateSetter<u64>,
+    catalog_id: u16,
+) {
+    let now_ms = now_ms();
+    delegate_op_once(
+        core,
+        pending,
+        bump,
+        AppRequest::SellGearAll { catalog_id, now_ms },
+        "sell all",
+    );
+}
+
 pub fn forge_upgrade_once(
     core: CoreCell,
     pending: PendingCell,

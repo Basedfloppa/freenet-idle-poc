@@ -12,13 +12,14 @@ use crate::app::types::Tab;
 /// Takes `locale` so tab labels honour the active UI language. The
 /// icon and `Tab` variant are locale-independent; only the human
 /// label flips.
-pub fn top_actions(locale: Locale) -> [(&'static str, &'static str, Tab); 7] {
+pub fn top_actions(locale: Locale) -> [(&'static str, &'static str, Tab); 8] {
     [
         ("🛡", locale.tr(MessageId::TabFarm), Tab::Farm),
         ("🗺", locale.tr(MessageId::TabWorldMap), Tab::WorldMap),
         ("🛒", locale.tr(MessageId::TabShop), Tab::Shop),
         ("⚔", locale.tr(MessageId::TabGuilds), Tab::Guilds),
         ("🏆", locale.tr(MessageId::TabAchievements), Tab::Achievements),
+        ("⭐", locale.tr(MessageId::TabMastery), Tab::Mastery),
         ("⚙", locale.tr(MessageId::TabSettings), Tab::Settings),
         ("❔", locale.tr(MessageId::TabHelp), Tab::Help),
     ]

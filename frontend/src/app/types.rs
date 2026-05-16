@@ -13,6 +13,11 @@ pub enum Tab {
     Shop,
     Guilds,
     Achievements,
+    /// Permanent-upgrades home (Legacy stars, Routine auto-hire,
+    /// Insight nodes, Tokens, World Boss attack). Used to live
+    /// in Settings — moved out because long-term progression and
+    /// volatile UI prefs don't belong on the same tab.
+    Mastery,
     Settings,
     Help,
 }

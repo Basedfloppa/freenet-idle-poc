@@ -64,6 +64,17 @@ impl TokenPerk {
         }
     }
 
+    pub fn description(self) -> &'static str {
+        match self {
+            TokenPerk::ChampionBadge =>
+                "Cosmetic marker on your leaderboard row showing you've cleared the boss-damage milestone tree.",
+            TokenPerk::ExtraSlot =>
+                "Reserves a 9th equipment slot for a future gear-mask expansion. Cosmetic for now.",
+            TokenPerk::SecondAutoPreset =>
+                "Unlocks the slot for a second auto-mission preset (separate HP threshold + area). UI for switching the preset lands as a follow-up.",
+        }
+    }
+
     /// One-shot price in tokens. No level curve for cosmetics —
     /// each perk is either unlocked or not.
     pub fn price(self) -> u64 {
