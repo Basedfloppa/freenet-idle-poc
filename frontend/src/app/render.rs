@@ -1092,7 +1092,7 @@ pub fn render_core(
         .map(|pk| match locale.fmt_locale() {
             Locale::En => format!("pubkey (from delegate): {}", crate::short_id(&pk)),
             Locale::Ru => format!("ключ (от делегата): {}", crate::short_id(&pk)),
-            Locale::De => unreachable!("fmt_locale normalises De"),
+            _ => unreachable!("fmt_locale normalises non-En/Ru locales"),
         })
         .unwrap_or_else(|| locale.tr(MessageId::TermPubkeyPending).to_string());
 
@@ -2303,7 +2303,7 @@ pub fn render_core(
 
                             <h3>{ locale.tr(MessageId::SettingsLanguage) }</h3>
                             <div class="theme-picker">
-                                { for [Locale::En, Locale::Ru, Locale::De].iter().map(|loc| {
+                                { for [Locale::En, Locale::Ru, Locale::De, Locale::Fr, Locale::Es, Locale::Ja].iter().map(|loc| {
                                     let is_active = c.prefs.locale == *loc;
                                     let cls = if is_active { "theme-btn active" } else { "theme-btn" };
                                     // Render the label in its OWN
@@ -2316,6 +2316,9 @@ pub fn render_core(
                                         Locale::En => "English",
                                         Locale::Ru => "Русский",
                                         Locale::De => "Deutsch",
+                                        Locale::Fr => "Français",
+                                        Locale::Es => "Español",
+                                        Locale::Ja => "日本語",
                                     };
                                     html! {
                                         <button
