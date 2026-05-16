@@ -148,6 +148,10 @@ impl DelegateInterface for IdentityDelegate {
             AppRequest::SetIdleAction { action, now_ms } => {
                 map_inv(actions::set_idle_action(ctx, action, now_ms))
             }
+            AppRequest::BuyLegacyNode { node_id, now_ms } => {
+                map_inv(actions::buy_legacy_node(ctx, node_id, now_ms))
+            }
+            AppRequest::Ascend { now_ms } => map_inv(actions::ascend(ctx, now_ms)),
         };
 
         let out_envelope = DelegateEnvelopeOut {

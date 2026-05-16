@@ -7,7 +7,7 @@
 
 use freenet_stdlib::prelude::*;
 
-use shared::{area_predecessor, level_of, Inventory, AREAS};
+use shared::{area_of, area_predecessors, level_of, Inventory, AREAS};
 
 use crate::state::{enter_action, load_inventory_raw, save_inventory};
 
@@ -29,20 +29,29 @@ pub fn set_area(
             area.name, area.min_level
         ));
     }
-    if let Some(prev_id) = area_predecessor(area_id) {
-        let have = inv.area_clears_of(prev_id);
-        if have < area.clears_required {
-            let prev_name = AREAS
+    // Graph-walk gate (C3): unlock if *any* predecessor has the
+    // required clear count. The error message names whichever
+    // predecessor the player is closest in — most actionable
+    // suggestion when they need to know what to grind.
+    let preds = area_predecessors(area_id);
+    if !preds.is_empty() {
+        let satisfied = preds
+            .iter()
+            .any(|p| inv.area_clears_of(*p) >= area.clears_required);
+        if !satisfied {
+            let (best_id, best_have) = preds
                 .iter()
-                .find(|a| a.id == prev_id)
-                .map(|a| a.name)
-                .unwrap_or("?");
+                .map(|p| (*p, inv.area_clears_of(*p)))
+                .max_by_key(|(_, h)| *h)
+                .unwrap_or((preds[0], 0));
+            let prev_name = area_of(best_id).name;
             return Err(format!(
                 "cannot enter '{}': need {} clears in '{}' (have {})",
-                area.name, area.clears_required, prev_name, have
+                area.name, area.clears_required, prev_name, best_have
             ));
         }
     }
+    let _ = AREAS;
     inv.current_area = area_id;
     inv.last_combat = None;
     save_inventory(ctx, &mut inv)?;

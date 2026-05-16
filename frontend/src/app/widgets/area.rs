@@ -1,7 +1,7 @@
 //! World-map area card. Three visual states (`current`,
 //! `unlocked`, `locked`) drive the disabled/highlight semantics.
 
-use shared::{area_predecessor, AreaDef, Inventory, MISSION_DAMAGE, MISSION_ESSENCE, MISSION_GOLD};
+use shared::{area_predecessor_progress, AreaDef, Inventory, MISSION_DAMAGE, MISSION_ESSENCE, MISSION_GOLD};
 use yew::prelude::*;
 
 use crate::app::i18n::{Locale, MessageId};
@@ -33,11 +33,12 @@ where
 {
     let is_current = area.id == current;
     let level_ok = lvl >= area.min_level;
-    let (clears_have, clears_need) = match area_predecessor(area.id) {
-        Some(prev_id) => (inv.area_clears_of(prev_id), area.clears_required),
-        None => (0, 0),
-    };
-    let clears_ok = clears_have >= clears_need;
+    // Graph gate (C3): satisfied if *any* predecessor has cleared
+    // enough. Show progress on the best one so the badge reads
+    // toward the route the player is closest to opening.
+    let (clears_have, clears_need) = area_predecessor_progress(area, |id| inv.area_clears_of(id))
+        .unwrap_or((0, 0));
+    let clears_ok = clears_need == 0 || clears_have >= clears_need;
     let unlocked = level_ok && clears_ok;
     let mut classes = vec!["area-card"];
     if is_current {

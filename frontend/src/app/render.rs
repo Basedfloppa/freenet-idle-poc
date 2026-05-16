@@ -421,6 +421,54 @@ pub fn render_core(
         }
     };
 
+    // Legacy node buy factory (C1). One callback per node id so
+    // the spend buttons in the Legacy panel can each dispatch
+    // their own BuyLegacyNode RPC.
+    let mk_buy_legacy_cb = {
+        let core = core_cell.clone();
+        let pending = pending.clone();
+        let bump = bump.clone();
+        move |node_id: u8| {
+            let core = core.clone();
+            let pending = pending.clone();
+            let bump = bump.clone();
+            Callback::from(move |_| {
+                crate::freenet::actions::legacy::buy_legacy_node_once(
+                    core.clone(),
+                    pending.clone(),
+                    bump.clone(),
+                    node_id,
+                )
+            })
+        }
+    };
+
+    // Ascend handler — soft-resets the run. Confirms first to
+    // avoid an accidental click wiping a session's worth of work.
+    let on_ascend = {
+        let core = core_cell.clone();
+        let pending = pending.clone();
+        let bump = bump.clone();
+        Callback::from(move |_: MouseEvent| {
+            // Browser-native confirm — the same chrome the
+            // ResetInventory button uses. Localised text would
+            // need a custom modal, deferred.
+            let ok = web_sys::window()
+                .and_then(|w| w.confirm_with_message(
+                    "Ascend — soft-reset run? Keeps stars, level, mission count, and skills. Wipes gold, gear, and Estate."
+                ).ok())
+                .unwrap_or(false);
+            if !ok {
+                return;
+            }
+            crate::freenet::actions::legacy::ascend_once(
+                core.clone(),
+                pending.clone(),
+                bump.clone(),
+            );
+        })
+    };
+
     // Estate idle-action toggle — flips between ESTATE and NONE
     // (single-active rule from §5.6, auto-mission button has its
     // own callback). The delegate's `SetIdleAction` keeps
@@ -850,9 +898,10 @@ pub fn render_core(
         .unwrap_or_else(|| locale.term_never().to_string());
 
     let pubkey_text = my
-        .map(|pk| match locale {
+        .map(|pk| match locale.fmt_locale() {
             Locale::En => format!("pubkey (from delegate): {}", crate::short_id(&pk)),
             Locale::Ru => format!("ключ (от делегата): {}", crate::short_id(&pk)),
+            Locale::De => unreachable!("fmt_locale normalises De"),
         })
         .unwrap_or_else(|| locale.tr(MessageId::TermPubkeyPending).to_string());
 
@@ -1660,27 +1709,31 @@ pub fn render_core(
                 Tab::Help => crate::app::tabs::render_help_tab(locale),
                 Tab::Settings => html! {
                     <>
+                        // Legacy / Epoch panel (backlog C1). Shows
+                        // accumulated stars, spendable nodes, and
+                        // the Ascend control. Always visible on
+                        // Settings — the modal feel for "prestige
+                        // dashboard" earns its own real estate.
+                        { render_legacy_panel(c, &mk_buy_legacy_cb, on_ascend.clone()) }
                         <section class="panel settings">
                             <h2>{ locale.tr(MessageId::SettingsTitle) }</h2>
 
                             <h3>{ locale.tr(MessageId::SettingsLanguage) }</h3>
                             <div class="theme-picker">
-                                { for [Locale::En, Locale::Ru].iter().map(|loc| {
+                                { for [Locale::En, Locale::Ru, Locale::De].iter().map(|loc| {
                                     let is_active = c.prefs.locale == *loc;
                                     let cls = if is_active { "theme-btn active" } else { "theme-btn" };
                                     // Render the label in its OWN
                                     // locale (so "English" / "Русский"
-                                    // always read natively, never get
-                                    // translated). This matches the
-                                    // convention common UI toolkits use
-                                    // for language pickers — users
-                                    // search for their language by its
-                                    // endonym.
-                                    let label = loc.tr(if *loc == Locale::Ru {
-                                        MessageId::LocaleRussian
-                                    } else {
-                                        MessageId::LocaleEnglish
-                                    });
+                                    // / "Deutsch" always read natively,
+                                    // never get translated). This is
+                                    // the endonym convention used by
+                                    // mainstream language pickers.
+                                    let label: &'static str = match loc {
+                                        Locale::En => "English",
+                                        Locale::Ru => "Русский",
+                                        Locale::De => "Deutsch",
+                                    };
                                     html! {
                                         <button
                                             class={cls}
@@ -1862,5 +1915,82 @@ pub fn render_core(
                 },
             } }
         </main>
+    }
+}
+
+/// Legacy / Epoch dashboard rendered on the Settings tab (C1).
+/// Lists each node's current level, multiplier value, and next-cost,
+/// plus the Ascend button. Hidden entirely when the player has no
+/// stars *and* no purchased nodes — a fresh account doesn't need a
+/// prestige UI cluttering Settings yet.
+fn render_legacy_panel<F>(
+    c: &Core,
+    mk_buy_cb: &F,
+    on_ascend: Callback<MouseEvent>,
+) -> Html
+where
+    F: Fn(u8) -> Callback<MouseEvent>,
+{
+    let legacy = &c.inventory.legacy;
+    if legacy.stars == 0 && legacy.nodes.is_empty() && legacy.ascend_count == 0 {
+        return html! {};
+    }
+    html! {
+        <section class="panel legacy">
+            <h2>{ "Legacy" }</h2>
+            <p class="muted small">
+                { format!(
+                    "Stars: {}  ·  Ascensions: {}  ·  Next star at level {}",
+                    legacy.stars,
+                    legacy.ascend_count,
+                    ((legacy.last_awarded_level / shared::STARS_PER_N_LEVELS) + 1)
+                        * shared::STARS_PER_N_LEVELS,
+                ) }
+            </p>
+            <table class="legacy-grid">
+                <thead>
+                    <tr>
+                        <th>{ "Node" }</th>
+                        <th class="num">{ "Level" }</th>
+                        <th class="num">{ "Multiplier" }</th>
+                        <th class="num">{ "Next cost" }</th>
+                        <th>{ "" }</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    { for shared::LegacyNode::ALL.iter().map(|node| {
+                        let lvl = legacy.node_level(*node);
+                        let mult_bp = legacy.node_multiplier_bp(*node);
+                        let cost = node.next_cost(lvl);
+                        let disabled = legacy.stars < cost;
+                        let cb = mk_buy_cb(node.id());
+                        let mult_label = format!(
+                            "×{}.{:02}",
+                            mult_bp / 10_000,
+                            (mult_bp % 10_000) / 100,
+                        );
+                        html! {
+                            <tr>
+                                <td>{ node.name() }</td>
+                                <td class="num">{ lvl }</td>
+                                <td class="num">{ mult_label }</td>
+                                <td class="num">{ format!("{}★", cost) }</td>
+                                <td>
+                                    <button onclick={cb} disabled={disabled}>
+                                        { "Buy" }
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    }) }
+                </tbody>
+            </table>
+            <div class="action-row">
+                <button class="danger" onclick={on_ascend}>{ "Ascend" }</button>
+                <span class="muted small">
+                    { "Soft-reset: keep stars, level, missions, skills. Wipe gold, gear, Estate." }
+                </span>
+            </div>
+        </section>
     }
 }

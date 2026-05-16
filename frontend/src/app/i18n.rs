@@ -43,6 +43,29 @@ pub enum Locale {
     #[default]
     En,
     Ru,
+    /// German (C5). Auto-selected when `navigator.language` starts
+    /// with `de` and the player has no stored preference yet.
+    /// Translation coverage is partial: see `Locale::tr_de` for
+    /// the curated set — every other `MessageId` falls back to
+    /// English via the catch-all arm in `tr`. Compound `fmt_*`
+    /// helpers go through `Locale::fmt_locale` which normalises
+    /// `De → En` so they don't need a third match arm each.
+    De,
+}
+
+impl Locale {
+    /// Normalise compound-format dispatch: any locale without a
+    /// curated `fmt_*` override falls back to English. Methods in
+    /// the `impl Locale` block below call this on `self` at the
+    /// top of each match so the existing two-arm matches stay
+    /// exhaustive without adding a `Self::De` arm everywhere.
+    #[inline]
+    pub fn fmt_locale(self) -> Self {
+        match self {
+            Self::De => Self::En,
+            other => other,
+        }
+    }
 }
 
 impl Locale {
@@ -463,7 +486,36 @@ impl Locale {
             (Self::Ru, MessageId::HelpDelegateWhat) => "что делает делегат?",
             (Self::En, MessageId::HelpGuildsMailbox) => "guilds & mailbox (early)",
             (Self::Ru, MessageId::HelpGuildsMailbox) => "гильдии и почта (ранняя стадия)",
+
+            // German (C5). Selective overrides for the highest-impact
+            // surface area (tabs, status pills) — anything not listed
+            // falls through to English via this catch-all arm.
+            (Self::De, m) => Self::tr_de(m).unwrap_or_else(|| Self::En.tr(m)),
         }
+    }
+
+    /// Curated German overrides. Add entries here as translation
+    /// coverage grows; missing ids fall back to English.
+    fn tr_de(msg: MessageId) -> Option<&'static str> {
+        Some(match msg {
+            MessageId::BootLoading => "Lädt…",
+            MessageId::StatusAskingDelegate => "frage Delegate nach Identität…",
+            MessageId::StatusRegisteringDelegate => "registriere Delegate…",
+            MessageId::StatusSubscribing => "abonniere…",
+            MessageId::TabFarm => "Hof",
+            MessageId::TabWorldMap => "Weltkarte",
+            MessageId::TabShop => "Laden",
+            MessageId::TabGuilds => "Gilden",
+            MessageId::TabAchievements => "Erfolge",
+            MessageId::TabSettings => "Einstellungen",
+            MessageId::TabHelp => "Hilfe",
+            MessageId::PillDefeated => "BESIEGT",
+            MessageId::PillAdventuring => "AUF ABENTEUER",
+            MessageId::PillFocusing => "KONZENTRIERT",
+            MessageId::PillRecovering => "ERHOLUNG",
+            MessageId::PillReady => "BEREIT",
+            _ => return None,
+        })
     }
 }
 
@@ -482,14 +534,16 @@ impl Locale {
 
     /// "while you were away" body line 1 (missions run).
     pub fn fmt_catchup_summary(self, elapsed_human: &str, missions_won: u32, missions_lost: u32) -> String {
-        let mut out = match self {
+        let mut out = match self.fmt_locale() {
             Self::En => format!("Auto-mode ran for {elapsed_human} ({missions_won} missions)."),
             Self::Ru => format!("Авто-режим работал {elapsed_human} ({missions_won} миссий)."),
+            Self::De => unreachable!("fmt_locale normalises De → En/Ru"),
         };
         if missions_lost > 0 {
-            let tail = match self {
+            let tail = match self.fmt_locale() {
                 Self::En => format!(" {missions_lost} ended in defeat."),
                 Self::Ru => format!(" {missions_lost} закончились поражением."),
+                Self::De => unreachable!("fmt_locale normalises De → En/Ru"),
             };
             out.push_str(&tail);
         }
@@ -498,25 +552,28 @@ impl Locale {
 
     /// "rewards: …" line on the catch-up banner.
     pub fn fmt_catchup_rewards(self, gold: &str, essence: &str, xp: &str, dmg: &str) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("rewards: +{gold}g · +{essence}e · +{xp} XP · +{dmg} boss damage"),
             Self::Ru => format!("награды: +{gold} зол · +{essence} эсс · +{xp} опыта · +{dmg} урона по боссу"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// Onboarding step counter ("step 1 / 4").
     pub fn fmt_onboarding_step(self, current: u8, total: u8) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("step {current} / {total}"),
             Self::Ru => format!("шаг {current} / {total}"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// Last-publish timestamp string ("3s ago" / "never").
     pub fn fmt_seconds_ago(self, seconds: u64) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("{seconds}s ago"),
             Self::Ru => format!("{seconds} с назад"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
@@ -526,7 +583,7 @@ impl Locale {
 
     /// Inbox count line on the mailbox panel — "inbox: N messages".
     pub fn fmt_inbox_count(self, n: usize) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("inbox: {n} message{}", if n == 1 { "" } else { "s" }),
             // Russian plural: 1, 2-4 → message/messages/messagesgen — we
             // collapse to the universal "сообщений" suffix which is
@@ -536,12 +593,13 @@ impl Locale {
                 let suffix = ru_plural(n as u64, "сообщение", "сообщения", "сообщений");
                 format!("ящик: {n} {suffix}")
             }
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// Stash item count line — "N items in stash — manage at the Shop tab".
     pub fn fmt_stash_count(self, n: usize) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!(
                 "{n} item{} in stash — manage at the Shop tab",
                 if n == 1 { "" } else { "s" }
@@ -550,6 +608,7 @@ impl Locale {
                 let suffix = ru_plural(n as u64, "предмет", "предмета", "предметов");
                 format!("{n} {suffix} в запасе — управляй на вкладке Магазин")
             }
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
@@ -561,86 +620,96 @@ impl Locale {
 
     /// "Era N · X / Y HP — Z total damage from W players".
     pub fn fmt_boss_summary(self, era: u64, hp: &str, max_hp: &str, total_dmg: &str, players: usize) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!(
                 "Era {era} · {hp} / {max_hp} HP — {total_dmg} total damage from {players} players"
             ),
             Self::Ru => format!(
                 "Эра {era} · {hp} / {max_hp} ОЗ — суммарно {total_dmg} урона от {players} игроков"
             ),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// "currently farming: X · level Y" on the world map.
     pub fn fmt_currently_farming(self, area: &str, lvl: u64) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("currently farming: {area} · level {lvl}"),
             Self::Ru => format!("сейчас фармишь: {area} · уровень {lvl}"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// "gold balance: X · potions: Y · fireballs: Z" — Shop top line.
     /// Quantities are passed as strings so any integer width works.
     pub fn fmt_shop_balance(self, gold: &str, potions: &str, fireballs: &str) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("gold balance: {gold} · potions: {potions} · fireballs: {fireballs}"),
             Self::Ru => format!("золото: {gold} · зелья: {potions} · фаерболы: {fireballs}"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// "Buy (Xg)" — paid-by-gold button label.
     pub fn fmt_buy_gold(self, price: u64) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("Buy ({price}g)"),
             Self::Ru => format!("Купить ({price} зол)"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// "Buy (Xe)" — paid-by-essence button label.
     pub fn fmt_buy_essence(self, price: u64) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("Buy ({price}e)"),
             Self::Ru => format!("Купить ({price} эсс)"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// "active players (N)" header.
     pub fn fmt_active_players(self, n: usize) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("active players ({n})"),
             Self::Ru => format!("активные игроки ({n})"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// "you are in: <guild name>" — h3 on the Guilds tab.
     pub fn fmt_you_are_in_guild(self, name: &str) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("you are in: {name}"),
             Self::Ru => format!("ты в гильдии: {name}"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// "members: N / M · leader: …" — guild meta line.
     pub fn fmt_guild_meta(self, members: usize, max_members: usize, leader_label: &str) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("members: {members} / {max_members} · leader: {leader_label}"),
             Self::Ru => format!("участники: {members} / {max_members} · лидер: {leader_label}"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// "directory (N)" header.
     pub fn fmt_directory(self, n: usize) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("directory ({n})"),
             Self::Ru => format!("каталог ({n})"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// "stash (N)" header on the Shop tab.
     pub fn fmt_stash_header(self, n: usize) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("stash ({n})"),
             Self::Ru => format!("запас ({n})"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
@@ -648,13 +717,14 @@ impl Locale {
     /// Pass the cadence in and we route to the right pair.
     pub fn fmt_sync_cadence(self, cadence: crate::app::prefs::SyncCadence) -> &'static str {
         use crate::app::prefs::SyncCadence as C;
-        match (self, cadence) {
+        match (self.fmt_locale(), cadence) {
             (Self::En, C::Aggressive) => "Aggressive (5s)",
             (Self::Ru, C::Aggressive) => "Агрессивно (5с)",
             (Self::En, C::Normal) => "Normal (10s)",
             (Self::Ru, C::Normal) => "Обычно (10с)",
             (Self::En, C::Easy) => "Easy (30s)",
             (Self::Ru, C::Easy) => "Спокойно (30с)",
+            (Self::De, _) => unreachable!("fmt_locale normalises De"),
         }
     }
 
@@ -669,9 +739,10 @@ impl Locale {
 
     /// World-map area card footer for the level-locked state — "lvl X required".
     pub fn fmt_lvl_required(self, min_level: u64) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("lvl {min_level} required"),
             Self::Ru => format!("нужен ур. {min_level}"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
@@ -680,9 +751,10 @@ impl Locale {
     /// predecessor zone hasn't been cleared enough times yet.
     /// Shows progress so the player knows how close they are.
     pub fn fmt_clears_required(self, have: u64, need: u64) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("clears {have} / {need} in prev"),
             Self::Ru => format!("нужно {have} / {need} зачисток в предыд."),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
@@ -690,33 +762,37 @@ impl Locale {
     /// shown alongside the gold / essence / damage badges so the
     /// player sees their mastery progress per zone.
     pub fn fmt_cleared_count(self, n: u64) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("cleared {n}"),
             Self::Ru => format!("зачищено {n}"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// Encounter progress line during a battle.
     pub fn fmt_encounter_progress(self, idx: u32, total: u32) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("encounter {idx} / {total}"),
             Self::Ru => format!("сражение {idx} / {total}"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// Tutorial / no-encounters hint about gear drop cadence.
     pub fn fmt_no_spare_loot(self, every_n: u32) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("no spare loot yet — gear drops every {every_n} missions"),
             Self::Ru => format!("свободного снаряжения нет — выпадает каждые {every_n} миссий"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// "Chapter N" caption on the plot panel.
     pub fn fmt_chapter(self, n: u64) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("Chapter {n}"),
             Self::Ru => format!("Глава {n}"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
@@ -725,7 +801,7 @@ impl Locale {
     /// substitutions; Russian rewrites the sentence structure so the
     /// nouns land in the right grammatical positions.
     pub fn fmt_plot_backstory(self, home: &str, mac: &str, vil: &str, mthd: &str, dest: &str) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!(
                 "You were abandoned in the {home} as a baby. Then one day, the {mac} disappeared! Surely the {vil} used the {mthd} to take it! Now you must journey to the {dest} to confront them."
             ),
@@ -735,13 +811,14 @@ impl Locale {
             Self::Ru => format!(
                 "Тебя бросили младенцем в {home}. И вот однажды исчез {mac}! Это, конечно же, {vil} применил {mthd}, чтобы его забрать! Теперь твой путь — в {dest}, чтобы встретиться с ним лицом к лицу."
             ),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// "Mission in <area>: up to N encounters, ..." subtitle under the
     /// Run-Mission button when no battle is in flight.
     pub fn fmt_mission_summary(self, area: &str, encounters: u32, essence: u64, mission_damage: u64) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => {
                 if mission_damage == 0 {
                     format!("Mission in {area}: up to {encounters} encounters, ~{essence} essence per win, no World Boss contribution from this area — gold scales by enemy")
@@ -756,90 +833,101 @@ impl Locale {
                     format!("Миссия в {area}: до {encounters} сражений, ~{essence} эссенции + ~{mission_damage} урона по боссу за победу — золото зависит от врага")
                 }
             }
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// "last publish: <age> · published gold X · published damage Y"
     pub fn fmt_last_publish(self, age: &str, gold: &str, damage: &str) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("last publish: {age} · published gold {gold} · published damage {damage}"),
             Self::Ru => format!("последняя публикация: {age} · золото {gold} · урон по боссу {damage}"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// "equipped bonus: +X atk · +Y def · +Z hp" — equipment-panel subtitle.
     pub fn fmt_equipped_bonus(self, atk: u64, def: u64, hp: u64) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("equipped bonus: +{atk} atk · +{def} def · +{hp} hp"),
             Self::Ru => format!("бонус экипировки: +{atk} атк · +{def} защ · +{hp} ОЗ"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// "deals {N} damage to the World Boss" — fireball idle tooltip.
     pub fn fmt_fireball_idle(self, dmg: u64) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("deals {dmg} damage to the World Boss"),
             Self::Ru => format!("наносит {dmg} урона Мировому Боссу"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// "convert all wheat to gold at 1:N" — Sell All Wheat tooltip.
     pub fn fmt_sell_wheat_tooltip(self, ratio: u64) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("convert all wheat to gold at 1:{ratio}"),
             Self::Ru => format!("обменять всю пшеницу на золото по курсу 1:{ratio}"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// "wheat: N · would sell for Mg" — farm panel running total.
     pub fn fmt_wheat_balance(self, wheat: &str, gold: &str) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("wheat: {wheat} · would sell for {gold}g"),
             Self::Ru => format!("пшеница: {wheat} · принесёт {gold} зол"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// Confirm-dialog body: "Reset all inventory progress?…"
     pub fn confirm_reset_progress(self) -> &'static str {
-        match self {
+        match self.fmt_locale() {
             Self::En => "Reset all inventory progress?\n\nYour identity (pubkey) stays the same — leaderboards keep recognizing you — but every counter, item, skill, ending, and achievement goes back to zero.",
             Self::Ru => "Сбросить весь прогресс инвентаря?\n\nЛичность (публичный ключ) остаётся той же — таблицы лидеров продолжат тебя узнавать — но все счётчики, предметы, навыки, финалы и достижения обнулятся.",
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// Confirm-dialog body: "Reveal your Ed25519 seed?…"
     pub fn confirm_reveal_seed(self) -> &'static str {
-        match self {
+        match self.fmt_locale() {
             Self::En => "Reveal your Ed25519 seed?\n\nAnyone holding it can impersonate you. Only paste it into trusted backup storage; never into chat or screenshots.",
             Self::Ru => "Показать Ed25519 seed?\n\nЛюбой, кто получит его, сможет выдать себя за тебя. Вставляй его только в надёжное хранилище резервных копий — никогда в чат или скриншоты.",
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// Confirm-dialog body: "Disband \"<name>\"?…"
     pub fn confirm_disband_guild(self, guild_name: &str) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!(
                 "Disband \"{guild_name}\"?\n\nThis removes the guild entirely and every member loses their membership immediately. Only you (the current leader) can do this; if you change your mind, just don't click OK.",
             ),
             Self::Ru => format!(
                 "Распустить гильдию «{guild_name}»?\n\nЭто полностью удалит гильдию, и все участники потеряют членство сразу. Только ты (текущий лидер) можешь это сделать; если передумал — просто не нажимай ОК.",
             ),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     /// Status-bar line after exporting the seed — flips between
     /// success and error variants.
     pub fn status_seed_exported(self) -> &'static str {
-        match self {
+        match self.fmt_locale() {
             Self::En => "seed exported — copy and hide promptly",
             Self::Ru => "seed экспортирован — скопируй и спрячь поскорее",
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
     pub fn fmt_status_seed_export_failed(self, err: &str) -> String {
-        match self {
+        match self.fmt_locale() {
             Self::En => format!("export failed: {err}"),
             Self::Ru => format!("экспорт не удался: {err}"),
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 
@@ -847,9 +935,10 @@ impl Locale {
     /// Returns plain text (without inline `<strong>` markup); the
     /// help tab no longer needs the bolded keywords once translated.
     pub fn help_body(self) -> HelpBody {
-        match self {
+        match self.fmt_locale() {
             Self::En => HelpBody::EN,
             Self::Ru => HelpBody::RU,
+                    Self::De => unreachable!("fmt_locale normalises De"),
         }
     }
 }
@@ -1188,6 +1277,7 @@ pub fn locale_code(l: Locale) -> &'static str {
     match l {
         Locale::En => "en",
         Locale::Ru => "ru",
+        Locale::De => "de",
     }
 }
 
@@ -1197,23 +1287,26 @@ pub fn locale_code(l: Locale) -> &'static str {
 pub fn locale_from_code(code: &str) -> Locale {
     match code {
         "ru" => Locale::Ru,
+        "de" => Locale::De,
         _ => Locale::En,
     }
 }
 
 /// Detect a sensible default locale on first load by reading
-/// `navigator.language`. Returns `Ru` if it starts with `ru` (covers
-/// `ru`, `ru-RU`, `ru-UA`, etc.); otherwise `En`. The detected value
-/// is only used the first time UserPrefs is built — once persisted
-/// the picker decides.
+/// `navigator.language`. Returns the first `Locale` whose short
+/// code is a prefix of the browser-reported tag — covers regional
+/// variants (`ru-RU`, `de-AT`) without enumerating each. The
+/// detected value is only used the first time UserPrefs is built;
+/// once persisted the picker decides.
 pub fn detect_browser_locale() -> Locale {
     let Some(win) = web_sys::window() else {
         return Locale::En;
     };
     let lang = win.navigator().language().unwrap_or_default().to_lowercase();
-    if lang.starts_with("ru") {
-        Locale::Ru
-    } else {
-        Locale::En
+    for loc in [Locale::Ru, Locale::De] {
+        if lang.starts_with(locale_code(loc)) {
+            return loc;
+        }
     }
+    Locale::En
 }

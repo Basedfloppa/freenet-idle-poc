@@ -284,7 +284,12 @@ fn run_one_turn(inv: &mut Inventory, turn_ms: u64) -> TurnOutcome {
 fn end_encounter_win(inv: &mut Inventory, enemy_id: u16, turn_ms: u64) {
     let area = *area_of(inv.current_area);
     let Some(enemy) = enemy_def(enemy_id).copied() else { return };
-    let gold_gained = enemy.gold_reward.saturating_mul(area.gold_mult);
+    let raw_gold = enemy.gold_reward.saturating_mul(area.gold_mult);
+    // Legacy multiplier on mission gold (C1).
+    let gold_mult_bp = inv
+        .legacy
+        .node_multiplier_bp(shared::LegacyNode::MissionGold);
+    let gold_gained = raw_gold.saturating_mul(gold_mult_bp) / 10_000;
     inv.mission_count = inv.mission_count.saturating_add(1);
     // Per-area clear counter — feeds the unlock-gate for the
     // next area (A3 in `docs/gameplay-backlog.md`).

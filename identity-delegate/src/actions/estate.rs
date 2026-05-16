@@ -100,6 +100,9 @@ pub fn tick_estate(inv: &mut Inventory, now_ms: u64) {
         elapsed_sec = MAX_ESTATE_CATCHUP_SEC;
     }
     let form = inv.base.base.current_form;
+    let legacy_mult_bp = inv
+        .legacy
+        .node_multiplier_bp(shared::LegacyNode::EstateYield);
     let workers_snapshot: Vec<(u8, u64)> = inv
         .estate
         .workers
@@ -120,7 +123,11 @@ pub fn tick_estate(inv: &mut Inventory, now_ms: u64) {
             .yield_per_sec
             .saturating_mul(count)
             .saturating_mul(elapsed_sec);
-        let scaled = raw.saturating_mul(aff) / 10_000;
+        let with_aff = raw.saturating_mul(aff) / 10_000;
+        // Layer the Legacy multiplier on top (C1). Compounds with
+        // form affinity multiplicatively — small stacks at first,
+        // strong by mid-game when a few nodes are bought.
+        let scaled = with_aff.saturating_mul(legacy_mult_bp) / 10_000;
         match tier.produces {
             EstateResource::Wheat => wheat_gain = wheat_gain.saturating_add(scaled),
             EstateResource::Gold => gold_gain = gold_gain.saturating_add(scaled),

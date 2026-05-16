@@ -35,7 +35,10 @@ use super::i18n::Locale;
 /// Localized form name. Falls through to "Unknown"/"Неизвестно" for
 /// out-of-table ids — matches the shared crate's `"Unknown"` fallback.
 pub fn form_name(locale: Locale, form: u8) -> &'static str {
-    match (locale, form) {
+    // C5: any locale without a curated `fmt_*` table is shown
+    // English by reading through `Locale::fmt_locale`. Cheaper
+    // than threading a third arm into every `match` body.
+    match (locale.fmt_locale(), form) {
         (Locale::En, FORM_HUMAN) => "Human",
         (Locale::Ru, FORM_HUMAN) => "Человек",
         (Locale::En, FORM_SLIME) => "Slime",
@@ -48,37 +51,44 @@ pub fn form_name(locale: Locale, form: u8) -> &'static str {
         (Locale::Ru, FORM_HORSE) => "Конь",
         (Locale::En, _) => "Unknown",
         (Locale::Ru, _) => "Неизвестно",
+        (Locale::De, _) => unreachable!("fmt_locale normalises De"),
     }
 }
 
 /// Localized area name. Falls back to the English `AreaDef.name` for
 /// out-of-table ids so the UI never shows an empty cell.
 pub fn area_name(locale: Locale, area: &AreaDef) -> &'static str {
-    match (locale, area.id) {
+    match (locale.fmt_locale(), area.id) {
         (Locale::En, _) => area.name,
         (Locale::Ru, 0) => "Деревенские поля",
         (Locale::Ru, 1) => "Лесная дорога",
         (Locale::Ru, 2) => "Горный перевал",
         (Locale::Ru, 3) => "Логово Босса",
+        (Locale::Ru, 4) => "Глубокий лес",
+        (Locale::Ru, 5) => "Снежные равнины",
         (Locale::Ru, _) => area.name,
+        (Locale::De, _) => unreachable!("fmt_locale normalises De"),
     }
 }
 
 pub fn area_blurb(locale: Locale, area: &AreaDef) -> &'static str {
-    match (locale, area.id) {
+    match (locale.fmt_locale(), area.id) {
         (Locale::En, _) => area.blurb,
         (Locale::Ru, 0) => "лёгкая работа — сбалансированные награды (без босса)",
         (Locale::Ru, 1) => "много эссенции, мало риска (без босса)",
         (Locale::Ru, 2) => "купцы платят щедро; меньше эссенции (без босса)",
         (Locale::Ru, 3) => "тяжёлый урон; единственная область, бьющая Мирового Босса",
+        (Locale::Ru, 4) => "густая чаща — больше эссенции, враги опаснее",
+        (Locale::Ru, 5) => "продуваемые ветром плато — много золота, тяжёлые потери",
         (Locale::Ru, _) => area.blurb,
+        (Locale::De, _) => unreachable!("fmt_locale normalises De"),
     }
 }
 
 /// Localized enemy display name. Uses the enemy id for routing so
 /// the table stays compact even as new enemies get added.
 pub fn enemy_name(locale: Locale, enemy: &EnemyDef) -> &'static str {
-    match (locale, enemy.id) {
+    match (locale.fmt_locale(), enemy.id) {
         (Locale::En, _) => enemy.name,
         (Locale::Ru, 0) => "злой эльф",
         (Locale::Ru, 1) => "средневековый юрист",
@@ -90,11 +100,12 @@ pub fn enemy_name(locale: Locale, enemy: &EnemyDef) -> &'static str {
         (Locale::Ru, 30) => "молодой дракон",
         (Locale::Ru, 31) => "повелитель теней",
         (Locale::Ru, _) => enemy.name,
+        (Locale::De, _) => unreachable!("fmt_locale normalises De"),
     }
 }
 
 pub fn enemy_death_blurb(locale: Locale, enemy: &EnemyDef) -> &'static str {
-    match (locale, enemy.id) {
+    match (locale.fmt_locale(), enemy.id) {
         (Locale::En, _) => enemy.death_blurb,
         (Locale::Ru, 0) => "Эльф одолевает тебя и оставляет истекать кровью у дороги. Ты доползаешь домой, в синяках, но всё ещё собой.",
         (Locale::Ru, 1) => "Юрист вручает тебе предписание, которое сплющивает твоё эго. Ты ковыляешь домой, всё такой же обычный.",
@@ -106,6 +117,7 @@ pub fn enemy_death_blurb(locale: Locale, enemy: &EnemyDef) -> &'static str {
         (Locale::Ru, 30) => "Огонь дракона спекает твои кости в чешуйки. Когда всё кончается, ты не помнишь, как быть маленьким. Теперь ты дракон.",
         (Locale::Ru, 31) => "Повелитель теней высасывает тебя до оболочки, но кожа выдерживает. Ты возвращаешься в деревню, всё ещё человек, всё ещё жив — едва.",
         (Locale::Ru, _) => enemy.death_blurb,
+        (Locale::De, _) => unreachable!("fmt_locale normalises De"),
     }
 }
 
@@ -210,7 +222,7 @@ pub fn achievement_label(locale: Locale, id: u8) -> &'static str {
 pub fn achievement_reason(locale: Locale, id: u8) -> String {
     for (aid, check) in ACHIEVEMENT_TABLE {
         if *aid == id {
-            return match (locale, *check) {
+            return match (locale.fmt_locale(), *check) {
                 (Locale::En, AchievementCheck::Missions(n)) => format!("Run {n} missions"),
                 (Locale::Ru, AchievementCheck::Missions(n)) => format!("Пройди {n} миссий"),
                 (Locale::En, AchievementCheck::BossDamage(n)) => format!("Deal {n} damage to the World Boss"),
@@ -223,12 +235,14 @@ pub fn achievement_reason(locale: Locale, id: u8) -> String {
                 (Locale::Ru, AchievementCheck::WinCount(n)) => format!("Выиграй {n} сражений"),
                 (Locale::En, AchievementCheck::LegendaryEquipped) => "Equip a Legendary (T4) item".into(),
                 (Locale::Ru, AchievementCheck::LegendaryEquipped) => "Надень Легендарный (T4) предмет".into(),
+                (Locale::De, _) => unreachable!("fmt_locale normalises De"),
             };
         }
     }
-    match locale {
+    match locale.fmt_locale() {
         Locale::En => "unknown achievement".into(),
         Locale::Ru => "неизвестное достижение".into(),
+        Locale::De => unreachable!("fmt_locale normalises De"),
     }
 }
 
@@ -239,9 +253,10 @@ pub fn achievement_reason(locale: Locale, id: u8) -> String {
 pub fn slot_name(locale: Locale, idx: usize) -> &'static str {
     const RU_SLOTS: [&str; SLOT_COUNT] =
         ["Шлем", "Плащ", "Нагрудник", "Штаны", "Щит", "Меч", "Сапоги", "Кольцо"];
-    match locale {
+    match locale.fmt_locale() {
         Locale::En => shared::SLOT_NAMES.get(idx).copied().unwrap_or("?"),
         Locale::Ru => RU_SLOTS.get(idx).copied().unwrap_or("?"),
+        Locale::De => unreachable!("fmt_locale normalises De"),
     }
 }
 
@@ -249,9 +264,10 @@ pub fn slot_name(locale: Locale, idx: usize) -> &'static str {
 pub fn tier_prefix(locale: Locale, tier: u8) -> &'static str {
     let idx = tier.saturating_sub(1) as usize;
     const RU_TIERS: [&str; 4] = ["Изношенный", "Полированный", "Рунный", "Легендарный"];
-    match locale {
+    match locale.fmt_locale() {
         Locale::En => shared::TIER_PREFIXES.get(idx).copied().unwrap_or("?"),
         Locale::Ru => RU_TIERS.get(idx).copied().unwrap_or("?"),
+        Locale::De => unreachable!("fmt_locale normalises De"),
     }
 }
 
@@ -268,7 +284,7 @@ pub fn gear_name(locale: Locale, t: &GearTemplate) -> String {
 /// beyond the table.
 pub fn chapter(locale: Locale, inv: &Inventory) -> (u8, String, String) {
     let area_id = inv.current_area;
-    match (locale, area_id) {
+    match (locale.fmt_locale(), area_id) {
         (Locale::En, 0) => (
             1,
             "Chapter 1 · The Village Fields".into(),
@@ -317,6 +333,7 @@ pub fn chapter(locale: Locale, inv: &Inventory) -> (u8, String, String) {
             "Глава 4 · Логово Босса".into(),
             "Ты добрался до внутреннего святилища. Тяжёлая работа по урону — каждый твой удар отражается в шкале ОЗ Мирового Босса, которую каждый подключённый игрок видит в реальном времени.".into(),
         ),
+        (Locale::De, _) => unreachable!("fmt_locale normalises De"),
     }
 }
 
@@ -335,9 +352,10 @@ pub fn plot_tuple_l10n(locale: Locale, seed: u32) -> (&'static str, &'static str
 }
 
 fn locale_idx(locale: Locale) -> usize {
-    match locale {
+    match locale.fmt_locale() {
         Locale::En => 0,
         Locale::Ru => 1,
+        Locale::De => unreachable!("fmt_locale normalises De"),
     }
 }
 

@@ -30,15 +30,15 @@ pub fn render_achievements_tab(
                 <h2>{ locale.fmt_count_of(locale.tr(MessageId::PanelEndings), inv.ending_unlocks.len(), ENDINGS_TOTAL) }</h2>
                 <p class="muted small">
                     { match locale {
-                        Locale::En => "Terminal-state milestones. Unlocking one doesn't end your run — keep playing past every one. Mutually reachable in any order.",
                         Locale::Ru => "Финальные вехи. Открытие одной не прекращает прохождение — продолжай играть после любой. Достижимы в любом порядке.",
+                        _ => "Terminal-state milestones. Unlocking one doesn't end your run — keep playing past every one. Mutually reachable in any order.",
                     } }
                 </p>
                 {
                     if inv.ending_unlocks.is_empty() {
                         html! { <p class="muted">{ match locale {
-                            Locale::En => "no endings unlocked yet — Pilgrim is the easiest: visit all 5 forms",
                             Locale::Ru => "финалов пока нет — самый простой Пилигрим: посети все 5 форм",
+                            _ => "no endings unlocked yet — Pilgrim is the easiest: visit all 5 forms",
                         } }</p> }
                     } else {
                         html! {
@@ -64,15 +64,15 @@ pub fn render_achievements_tab(
                 ) }</h2>
                 <p class="muted small">
                     { match locale {
-                        Locale::En => "Skills are permanent passive bonuses. Each form you've taken leaves a mark on you — they don't reset when you change back. Level 10 and 20 unlock veteran milestones.",
                         Locale::Ru => "Навыки — постоянные пассивные бонусы. Каждая принятая форма оставляет свой след — он не сбрасывается при возврате. Уровни 10 и 20 открывают вехи ветерана.",
+                        _ => "Skills are permanent passive bonuses. Each form you've taken leaves a mark on you — they don't reset when you change back. Level 10 and 20 unlock veteran milestones.",
                     } }
                 </p>
                 {
                     if inv.skills_unlocked.is_empty() {
                         html! { <p class="muted">{ match locale {
-                            Locale::En => "no skills yet — lose to a non-Human enemy to learn one",
                             Locale::Ru => "пока без навыков — проиграй не-Человеку, чтобы выучить первый",
+                            _ => "no skills yet — lose to a non-Human enemy to learn one",
                         } }</p> }
                     } else {
                         html! {
@@ -100,8 +100,8 @@ pub fn render_achievements_tab(
                 {
                     if inv.achievement_unlocks.is_empty() {
                         html! { <p class="muted">{ match locale {
-                            Locale::En => "no badges yet — run a mission to start",
                             Locale::Ru => "значков ещё нет — запусти миссию",
+                            _ => "no badges yet — run a mission to start",
                         } }</p> }
                     } else {
                         html! {
@@ -110,15 +110,6 @@ pub fn render_achievements_tab(
                                     inv.achievement_unlocks.get(id).map(|ts| {
                                         let age = now.saturating_sub(*ts);
                                         let age_str = match locale {
-                                            Locale::En => {
-                                                if age < 60_000 {
-                                                    format!("{}s ago", age / 1000)
-                                                } else if age < 3_600_000 {
-                                                    format!("{}m ago", age / 60_000)
-                                                } else {
-                                                    format!("{}h ago", age / 3_600_000)
-                                                }
-                                            }
                                             Locale::Ru => {
                                                 if age < 60_000 {
                                                     format!("{} с назад", age / 1000)
@@ -128,12 +119,21 @@ pub fn render_achievements_tab(
                                                     format!("{} ч назад", age / 3_600_000)
                                                 }
                                             }
+                                            _ => {
+                                                if age < 60_000 {
+                                                    format!("{}s ago", age / 1000)
+                                                } else if age < 3_600_000 {
+                                                    format!("{}m ago", age / 60_000)
+                                                } else {
+                                                    format!("{}h ago", age / 3_600_000)
+                                                }
+                                            }
                                         };
                                         // Tooltip = unlock criterion + when. Hover
                                         // shows what you did to get it.
                                         let unlocked_prefix = match locale {
-                                            Locale::En => "Unlocked",
                                             Locale::Ru => "Открыто",
+                                            _ => "Unlocked",
                                         };
                                         let tooltip = format!(
                                             "{}\n{unlocked_prefix} {age_str}",

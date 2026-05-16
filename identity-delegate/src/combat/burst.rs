@@ -117,6 +117,11 @@ fn resolve_encounter_burst(
         // Per-area clear counter — feeds the unlock-gate for the
         // next area (A3 in `docs/gameplay-backlog.md`).
         inv.area_clears_inc(area.id);
+        // Legacy multiplier on mission gold (C1).
+        let gold_mult_bp = inv
+            .legacy
+            .node_multiplier_bp(shared::LegacyNode::MissionGold);
+        let gold_gained = gold_gained.saturating_mul(gold_mult_bp) / 10_000;
         inv.gold = inv.gold.saturating_add(gold_gained);
         inv.essence = inv
             .essence

@@ -165,6 +165,15 @@ pub enum DelegateRequest {
     /// `IDLE_ACTION_ESTATE` pauses auto-mission and starts ticking
     /// the Estate; `IDLE_ACTION_NONE` pauses both.
     SetIdleAction { action: u8, now_ms: u64 },
+    /// Spend stars to level up a Legacy node (backlog C1). Refused
+    /// if the player doesn't have enough stars or the `node_id`
+    /// isn't recognised.
+    BuyLegacyNode { node_id: u8, now_ms: u64 },
+    /// Soft-reset the current run (clear gold, gear, Estate
+    /// workers, area, mission battle state). Keeps stars + Legacy
+    /// nodes, identity, level, mission_count. Increments
+    /// `ascend_count`. (Backlog C1, opt-in personal ascension.)
+    Ascend { now_ms: u64 },
 }
 
 /// Domain split for blob-encoded persisted state. Each variant maps

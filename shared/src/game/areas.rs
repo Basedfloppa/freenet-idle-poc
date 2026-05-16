@@ -15,21 +15,26 @@ pub struct AreaDef {
     pub enemy_hp: u64,
     pub enemy_atk: u64,
     pub enemy_def: u64,
-    /// Clears required in the **predecessor** area before this one
-    /// unlocks. `area_id - 1` is the predecessor today (the area
-    /// chain is linear). When the map turns into a graph (backlog
-    /// item C3), this generalises to "in any one of the
-    /// predecessor nodes along the chosen edge."
-    ///
-    /// `0` for `Village Fields` (the starter — no predecessor).
-    /// Tuned to feel like "a casual session in the previous zone."
+    /// Clears required in **any one** of `predecessors` before this
+    /// area unlocks. `0` (the starter case) keeps the area open even
+    /// when no predecessor is set.
     pub clears_required: u64,
+    /// Upstream area ids — the player needs `clears_required` clears
+    /// in at least one of these to unlock the current area (OR
+    /// semantics). Empty for starter areas (no gate). Multiple
+    /// entries encode the graph from backlog item C3: branches can
+    /// share parents, parents can fan out.
+    pub predecessors: &'static [u8],
 }
 
 pub const AREAS: &[AreaDef] = &[
-    // Only `Boss's Lair` credits the shared World Boss (`damage_mult > 0`).
-    // The earlier zones are pure XP / gold / essence farms — narratively
-    // you're not even within earshot of the boss there.
+    // Linear spine — Village → Forest → Mountain → Boss's Lair.
+    // Branches off Forest (Deep Forest, Eastern Plains) and a
+    // Snowfields branch off Mountain Pass let Wolf-form players
+    // detour through essence-rich nodes while Bear-form players
+    // can rush down the gold-heavy Mountain track. The Boss's Lair
+    // still requires clearing one of the two pre-boss areas, but
+    // either route works — backlog C3a's design intent.
     AreaDef {
         id: 0,
         name: "Village Fields",
@@ -42,6 +47,7 @@ pub const AREAS: &[AreaDef] = &[
         enemy_atk: 3,
         enemy_def: 1,
         clears_required: 0,
+        predecessors: &[],
     },
     AreaDef {
         id: 1,
@@ -55,6 +61,7 @@ pub const AREAS: &[AreaDef] = &[
         enemy_atk: 8,
         enemy_def: 3,
         clears_required: 10,
+        predecessors: &[0],
     },
     AreaDef {
         id: 2,
@@ -68,6 +75,7 @@ pub const AREAS: &[AreaDef] = &[
         enemy_atk: 18,
         enemy_def: 8,
         clears_required: 20,
+        predecessors: &[1],
     },
     AreaDef {
         id: 3,
@@ -81,6 +89,41 @@ pub const AREAS: &[AreaDef] = &[
         enemy_atk: 40,
         enemy_def: 18,
         clears_required: 30,
+        predecessors: &[2, 5],
+    },
+    // C3a branch off Forest Road — essence-skewed alternate that
+    // shares Forest's level tier. Both nodes (4 and 1) unlock the
+    // Mountain Pass, so a Wolf-form player can specialise without
+    // backtracking through the main line.
+    AreaDef {
+        id: 4,
+        name: "Deep Forest",
+        blurb: "thicket runs — better essence drops, harder enemies",
+        min_level: 4,
+        gold_mult: 2,
+        essence_mult: 5,
+        damage_mult: 0,
+        enemy_hp: 55,
+        enemy_atk: 12,
+        enemy_def: 4,
+        clears_required: 15,
+        predecessors: &[1],
+    },
+    // C3a snow branch off Mountain Pass — pre-boss alternate route
+    // with higher gold yield and a stricter enemy stat block.
+    AreaDef {
+        id: 5,
+        name: "Snowfields",
+        blurb: "wind-cut plateaus — gold-rich, attrition-heavy",
+        min_level: 8,
+        gold_mult: 6,
+        essence_mult: 2,
+        damage_mult: 0,
+        enemy_hp: 120,
+        enemy_atk: 26,
+        enemy_def: 12,
+        clears_required: 25,
+        predecessors: &[2],
     },
 ];
 
@@ -88,16 +131,33 @@ pub fn area_of(id: u8) -> &'static AreaDef {
     AREAS.iter().find(|a| a.id == id).unwrap_or(&AREAS[0])
 }
 
-/// The predecessor area whose clear-count gates this area, if any.
-/// Returns `None` for the starter (`Village Fields`). Today the chain
-/// is strictly linear (`id - 1`); when the map becomes a graph
-/// (backlog C3), this becomes a per-edge lookup.
-pub fn area_predecessor(area_id: u8) -> Option<u8> {
-    if area_id == 0 {
-        None
-    } else {
-        Some(area_id.saturating_sub(1))
+/// All predecessor area ids whose clear-count can satisfy the gate
+/// on `area_id`. Empty slice = starter area / no predecessor.
+/// OR-semantic: the player only needs `clears_required` clears in
+/// **one** of these to unlock the area (backlog C3).
+pub fn area_predecessors(area_id: u8) -> &'static [u8] {
+    area_of(area_id).predecessors
+}
+
+/// Helper for the "best predecessor progress" UI badge — returns
+/// `(have_in_best_predecessor, clears_required)`. Picks the
+/// predecessor with the highest current clear count so the badge
+/// always reflects the closest-to-unlocked path. `None` means no
+/// predecessor (starter area), so the gate is trivially satisfied.
+pub fn area_predecessor_progress(
+    area: &AreaDef,
+    clear_count_of: impl Fn(u8) -> u64,
+) -> Option<(u64, u64)> {
+    if area.predecessors.is_empty() {
+        return None;
     }
+    let best = area
+        .predecessors
+        .iter()
+        .map(|p| clear_count_of(*p))
+        .max()
+        .unwrap_or(0);
+    Some((best, area.clears_required))
 }
 
 pub fn era_max_hp(era: u64) -> u64 {

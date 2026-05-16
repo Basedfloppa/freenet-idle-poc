@@ -34,8 +34,8 @@ pub fn render_combat_history(locale: Locale, history: &[EncounterLog]) -> Html {
             let enemy_name = enemy_def(e.enemy_id)
                 .map(|d| i18n_shared::enemy_name(locale, d))
                 .unwrap_or(match locale {
-                    Locale::En => "unknown",
                     Locale::Ru => "неизвестно",
+                    _ => "unknown",
                 });
             let detail = if won {
                 format!(

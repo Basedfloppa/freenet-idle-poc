@@ -211,7 +211,7 @@ fn apply_settings(c: &mut crate::app::Core, settings: Settings) {
         }
     }
     if let Some(code) = settings.locale.as_deref() {
-        if code == "en" || code == "ru" {
+        if matches!(code, "en" | "ru" | "de") {
             c.prefs.locale = locale_from_code(code);
             save_prefs(&c.prefs);
         }

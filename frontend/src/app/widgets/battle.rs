@@ -112,7 +112,7 @@ pub fn render_battle_turns(locale: Locale, turns: &[shared::BattleTurn]) -> Html
 /// this method translates only the role label used in turn summaries.
 fn locale_enemy(locale: Locale) -> &'static str {
     match locale {
-        Locale::En => "enemy",
         Locale::Ru => "враг",
+        _ => "enemy",
     }
 }

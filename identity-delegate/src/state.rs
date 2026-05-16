@@ -62,7 +62,9 @@ pub fn load_inventory_raw(ctx: &mut DelegateCtx) -> Inventory {
         return wire.into_latest();
     }
     if let Ok(inv_v9) = bincode::deserialize::<InventoryV9>(&bytes) {
-        return shared::InventoryV12::from(shared::InventoryV11::from(InventoryV10::from(inv_v9)));
+        return shared::InventoryV13::from(shared::InventoryV12::from(shared::InventoryV11::from(
+            InventoryV10::from(inv_v9),
+        )));
     }
     Inventory::default()
 }
@@ -142,6 +144,11 @@ pub fn save_blob(ctx: &mut DelegateCtx, kind: BlobKind, payload: &[u8]) -> Resul
 pub fn save_inventory(ctx: &mut DelegateCtx, inv: &mut Inventory) -> Result<(), String> {
     let lvl = shared::level_of(inv);
     let _flipped = shared::recompute_reveals(inv, lvl);
+    // Award Legacy stars on every level-milestone the player has
+    // crossed (idempotent via `last_awarded_level`). Doing it here
+    // catches every mutation path — RunMission, BuySkill,
+    // ResetInventory after migration, etc.
+    crate::actions::legacy::award_pending_stars(inv);
     let wire = InventoryWire::from(inv.clone());
     let bytes = bincode::serialize(&wire).map_err(|e| format!("ser inventory: {e}"))?;
     if !ctx.set_secret(INVENTORY_SECRET_ID, &bytes) {

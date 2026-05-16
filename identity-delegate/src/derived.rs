@@ -52,8 +52,15 @@ pub fn max_hp_of(inv: &Inventory) -> u64 {
 pub fn attack_of(inv: &Inventory) -> u64 {
     let lvl = level_of(inv);
     let (atk_bonus, _, _) = total_bonuses(inv);
-    2u64.saturating_add(lvl.saturating_mul(2))
-        .saturating_add(atk_bonus)
+    let raw = 2u64
+        .saturating_add(lvl.saturating_mul(2))
+        .saturating_add(atk_bonus);
+    // Apply Legacy node multiplier (C1). Neutral when no nodes
+    // are unlocked (`node_multiplier_bp` returns 10_000 = ×1.0).
+    let mult_bp = inv
+        .legacy
+        .node_multiplier_bp(shared::LegacyNode::HeroAttack);
+    raw.saturating_mul(mult_bp) / 10_000
 }
 
 pub fn defence_of(inv: &Inventory) -> u64 {
