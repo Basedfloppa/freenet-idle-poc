@@ -513,6 +513,21 @@ h3 { font-size: 0.82em; color: var(--fg-muted); margin: 1em 0 0.4em; text-transf
 .area-card .area-name {
     font-weight: 600;
     font-size: 0.95em;
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    flex-wrap: wrap;
+}
+.area-level-badge {
+    font-weight: 500;
+    font-size: 0.7em;
+    padding: 1px 7px;
+    border-radius: 9px;
+    background: var(--tab-active-tag-bg);
+    color: var(--tab-active-tag-fg);
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    white-space: nowrap;
 }
 .area-card .area-blurb {
     font-size: 0.75em;
@@ -1525,7 +1540,7 @@ table.buy-grid tr.disabled-row button { cursor: not-allowed; }
     grid-column: 2;
     grid-row: 2;
     font-size: 0.82em;
-    padding: 0.2em 0.6em;
+    padding: 0.2em 0.5em;
     justify-self: end;
     /* Allow the localized label to wrap inside the button when the
        cell is too narrow (extreme RU widths under the narrow
@@ -1533,6 +1548,10 @@ table.buy-grid tr.disabled-row button { cursor: not-allowed; }
        cell. */
     white-space: normal;
     line-height: 1.1;
+    max-width: 100%;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    box-sizing: border-box;
 }
 
 /* Plot So Far panel. */

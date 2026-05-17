@@ -184,6 +184,17 @@ pub fn area_predecessor_progress(
     Some((best, area.clears_required))
 }
 
+/// Scale a base stat by an area's `min_level`. Linear ramp:
+/// `base * (10 + min_level - 1) / 10` so area level 1 stays
+/// neutral (×1.0), level 10 lands at ×1.9, level 20 at ×2.9.
+/// Used for enemy HP/atk/def/XP in `start_battle` and
+/// `end_encounter_win` so deeper areas hit harder and pay more.
+pub fn scale_by_area_level(base: u64, min_level: u64) -> u64 {
+    let lvl = min_level.max(1);
+    let factor = 10u64.saturating_add(lvl.saturating_sub(1));
+    base.saturating_mul(factor) / 10
+}
+
 pub fn era_max_hp(era: u64) -> u64 {
     WORLD_BOSS_MAX_HP.saturating_mul((era + 1).saturating_mul(era + 1))
 }

@@ -5,8 +5,8 @@
 //! and battle outcomes and update progression state.
 
 use shared::{
-    area_of, enemy_def, enemy_roster_for_area, gear_template, BattleState,
-    BattleTurn, CombatLog, EncounterLog, Inventory, BATTLE_ACTION_FIREBALL,
+    enemy_def, enemy_roster_for_area, gear_template, scale_by_area_level,
+    BattleState, BattleTurn, CombatLog, EncounterLog, Inventory, BATTLE_ACTION_FIREBALL,
     BATTLE_ACTION_NONE, BATTLE_ACTION_POTION, COMBAT_OUTCOME_LOSS, COMBAT_OUTCOME_WIN,
     ENCOUNTERS_PER_MISSION, FIREBALL_BOSS_DAMAGE, FIREBALL_DROP_EVERY, GEAR_DROP_EVERY,
     MISSION_DAMAGE, MISSION_ESSENCE, POTION_DROP_EVERY, TURN_COOLDOWN_MS,
@@ -39,11 +39,13 @@ pub fn start_battle(inv: &mut Inventory, now_ms: u64) -> Result<bool, String> {
     let enemy = enemy_def(enemy_id)
         .copied()
         .ok_or_else(|| format!("unknown enemy id {enemy_id}"))?;
+    let area_def = shared::current_area_def(inv);
+    let scaled_hp = scale_by_area_level(enemy.hp, area_def.min_level);
     inv.current_battle = Some(BattleState {
         encounter_idx: 0,
         enemy_id,
-        enemy_hp: enemy.hp,
-        enemy_max_hp: enemy.hp,
+        enemy_hp: scaled_hp,
+        enemy_max_hp: scaled_hp,
         // Anchor the first turn to "now − cooldown" so the very first
         // `tick_battle` call already produces a turn — otherwise
         // there's a confusing 1 s no-op delay after Start.
@@ -141,8 +143,13 @@ fn run_one_turn(inv: &mut Inventory, turn_ms: u64) -> TurnOutcome {
 
     // Pre-compute per-side hits using the same evasion-as-damage-
     // scaling rule the burst-mode resolver used.
-    let raw_player_dmg = (player_atk as i64 - enemy.def as i64).max(1) as u64;
-    let raw_enemy_dmg = (enemy.atk as i64 - player_def as i64).max(1) as u64;
+    // Enemy atk/def scale with the area's min_level so deeper
+    // areas hit harder even though `EnemyDef` is a static table.
+    let area_def = shared::current_area_def(inv);
+    let scaled_enemy_atk = scale_by_area_level(enemy.atk, area_def.min_level);
+    let scaled_enemy_def = scale_by_area_level(enemy.def, area_def.min_level);
+    let raw_player_dmg = (player_atk as i64 - scaled_enemy_def as i64).max(1) as u64;
+    let raw_enemy_dmg = (scaled_enemy_atk as i64 - player_def as i64).max(1) as u64;
     let player_hit = raw_player_dmg
         .saturating_mul(100u64.saturating_sub(enemy.evasion.min(95)))
         / 100;
@@ -296,20 +303,32 @@ fn end_encounter_win(inv: &mut Inventory, enemy_id: u16, turn_ms: u64) {
             .node_level(shared::InsightNode::GoldDropPct)
             .saturating_mul(100),
     );
+    let token_gold_bp = inv.tokens.gold_mult_bp();
     let gold_after_legacy = raw_gold.saturating_mul(legacy_bp) / 10_000;
-    let gold_gained = gold_after_legacy.saturating_mul(insight_bp) / 10_000;
+    let gold_after_insight = gold_after_legacy.saturating_mul(insight_bp) / 10_000;
+    let gold_gained = gold_after_insight.saturating_mul(token_gold_bp) / 10_000;
     inv.mission_count = inv.mission_count.saturating_add(1);
     // Per-area clear counter — feeds the unlock-gate for the
     // next area (A3 in `docs/gameplay-backlog.md`).
     inv.area_clears_inc(area.id);
+    // Wilds clear bonus: every cleared encounter in a Wilds area
+    // drops a small bundle of insight / extra essence so the Wilds
+    // detour pays out something the linear chain doesn't.
+    let token_boss_bp = inv.tokens.boss_damage_mult_bp();
+    let potion_drop = inv.tokens.potion_drop_count() as u64;
     inv.gold = inv.gold.saturating_add(gold_gained);
-    inv.essence = inv
-        .essence
-        .saturating_add(MISSION_ESSENCE.saturating_mul(area.essence_mult));
-    inv.boss_damage = inv
-        .boss_damage
-        .saturating_add(MISSION_DAMAGE.saturating_mul(area.damage_mult));
-    inv.experience = inv.experience.saturating_add(enemy.xp_reward);
+    let mut essence_gain = MISSION_ESSENCE.saturating_mul(area.essence_mult);
+    if area.id >= shared::WILDS_AREA_BASE {
+        essence_gain = essence_gain.saturating_add(area.essence_mult);
+    }
+    inv.essence = inv.essence.saturating_add(essence_gain);
+    let scaled_boss = MISSION_DAMAGE
+        .saturating_mul(area.damage_mult)
+        .saturating_mul(token_boss_bp)
+        / 10_000;
+    inv.boss_damage = inv.boss_damage.saturating_add(scaled_boss);
+    let scaled_xp = scale_by_area_level(enemy.xp_reward, area.min_level);
+    inv.experience = inv.experience.saturating_add(scaled_xp);
 
     if inv.mission_count % GEAR_DROP_EVERY == 0 {
         let drop_index = inv.mission_count / GEAR_DROP_EVERY;
@@ -321,7 +340,13 @@ fn end_encounter_win(inv: &mut Inventory, enemy_id: u16, turn_ms: u64) {
         }
     }
     if inv.mission_count % POTION_DROP_EVERY == 0 {
-        inv.potions = inv.potions.saturating_add(1);
+        inv.potions = inv.potions.saturating_add(potion_drop as u32);
+    }
+    // Wilds drop one extra insight per cleared encounter — pays
+    // back the Wilds-only "no boss damage" trade-off with a permanent
+    // currency that compounds across the spend tree.
+    if area.id >= shared::WILDS_AREA_BASE {
+        inv.insight.balance = inv.insight.balance.saturating_add(1);
     }
     if inv.mission_count % FIREBALL_DROP_EVERY == 0 {
         inv.fireballs = inv.fireballs.saturating_add(1);
@@ -373,6 +398,7 @@ fn advance_to_next_encounter(inv: &mut Inventory, turn_ms: u64) {
     // `current_battle` — Deref through V11→V10 doesn't field-split,
     // so we'd otherwise borrow-check-fail on `inv.current_area`.
     let area_id = inv.current_area;
+    let plot_seed = inv.plot_seed;
     let Some(battle) = inv.base.current_battle.as_mut() else { return };
     battle.encounter_idx = battle.encounter_idx.saturating_add(1);
     if battle.encounter_idx >= ENCOUNTERS_PER_MISSION as u8 {
@@ -393,9 +419,13 @@ fn advance_to_next_encounter(inv: &mut Inventory, turn_ms: u64) {
         inv.current_battle = None;
         return;
     };
+    let area_min_level = shared::resolve_area(area_id, plot_seed)
+        .map(|a| a.min_level)
+        .unwrap_or(1);
+    let scaled_hp = scale_by_area_level(next_enemy.hp, area_min_level);
     battle.enemy_id = next_enemy_id;
-    battle.enemy_hp = next_enemy.hp;
-    battle.enemy_max_hp = next_enemy.hp;
+    battle.enemy_hp = scaled_hp;
+    battle.enemy_max_hp = scaled_hp;
     // The fight continues — the next turn fires after one more
     // cooldown so the player has a beat to glance at the new enemy.
     battle.last_turn_ms = turn_ms;

@@ -299,7 +299,42 @@ fi
 echo
 echo "[prod-publish] trunk build --release"
 cd "$HERE/frontend"
+
+# Same trunk-serve guard as in prod-update-webapp.sh: the dev-server
+# watches dist/ and overwrites it with dev-mode incremental output
+# while we're packing the tarball — produces a 2-file bundle that
+# 404s every asset except index.html and the bg WASM.
+if pgrep -f "trunk serve" >/dev/null 2>&1; then
+    echo "[prod-publish] trunk serve is running — kill it before publishing:"
+    echo "[prod-publish]   pkill -f 'trunk serve'"
+    exit 1
+fi
+
 trunk build --release
+
+# Sanity-check dist completeness. Contract / delegate WASMs were
+# already cp'd into frontend/ above, so trunk's copy-file rules will
+# have picked them up — but if anything regressed, fail loudly here
+# rather than ship a half-bundle.
+EXPECTED_FILES=(
+    "dist/index.html"
+    "dist/style-"
+    "dist/frontend-"
+    "dist/identity_delegate.wasm"
+    "dist/presence_contract.wasm"
+    "dist/dev-keys.json"
+)
+MISSING=()
+for pat in "${EXPECTED_FILES[@]}"; do
+    if ! compgen -G "${pat}*" >/dev/null; then
+        MISSING+=("$pat")
+    fi
+done
+if (( ${#MISSING[@]} > 0 )); then
+    echo "[prod-publish] dist/ is missing expected files after trunk build:"
+    for m in "${MISSING[@]}"; do echo "    $m*"; done
+    exit 1
+fi
 
 ###############################################################################
 # Webapp signing key. `init` only needs to run once per machine; if

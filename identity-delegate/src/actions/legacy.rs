@@ -64,16 +64,11 @@ pub fn buy_legacy_node(
 }
 
 /// Soft-reset: clear gold, gear (equipped + stash), Estate workers,
-/// active battle, current area. Keep mission_count, level, xp,
-/// skills, achievements, forms_visited, mailbox, and the whole
-/// legacy ledger (stars + nodes).
-///
-/// Why keep level / mission_count? Without them, the star-award
-/// milestone math would re-trigger from zero after every ascend —
-/// the player would farm the same low-level mission 1,000 times to
-/// re-earn stars they already had. Capping the milestone via
-/// `last_awarded_level` preserves the watermark and forces stars
-/// to come from genuinely *new* progress.
+/// active battle, current area. Also resets the player's level/XP
+/// and area clear counters so the loop genuinely restarts —
+/// post-reset the milestone math sees the new ceiling via the
+/// existing `last_awarded_level` watermark and only awards stars
+/// for crossing levels above the pre-ascend high-water mark.
 pub fn ascend(ctx: &mut DelegateCtx, now_ms: u64) -> Result<Inventory, String> {
     let mut inv = load_inventory_raw(ctx);
     enter_action(&mut inv, now_ms)?;
@@ -81,7 +76,10 @@ pub fn ascend(ctx: &mut DelegateCtx, now_ms: u64) -> Result<Inventory, String> {
     // the player doesn't lose a milestone they crossed during the
     // run that's being ascended out of.
     award_pending_stars(&mut inv);
-    // Reset run state but keep level/xp + mission_count + skills.
+    // Reset run state. Levels/XP, mission_count and area_clears get
+    // wiped too so the world map re-gates from the village — the
+    // ascend reward is the permanent legacy ledger, not retained
+    // mid-game progress.
     inv.base.base.base.gold = 0;
     inv.base.base.base.unequipped.clear();
     inv.base.base.base.equipped = [None; shared::SLOT_COUNT];
@@ -94,9 +92,15 @@ pub fn ascend(ctx: &mut DelegateCtx, now_ms: u64) -> Result<Inventory, String> {
     inv.base.base.base.auto_run_enabled = false;
     inv.base.base.base.auto_last_tick_ms = 0;
     inv.base.base.base.last_catchup = None;
+    inv.base.base.base.experience = 0;
+    inv.base.base.base.mission_count = 0;
+    inv.base.base.area_clears.clear();
     inv.base.estate = EstateState::default();
     inv.base.idle_action = shared::IDLE_ACTION_NONE;
     inv.legacy.ascend_count = inv.legacy.ascend_count.saturating_add(1);
+    // Reset the per-life awarded-level watermark so new levels
+    // earned post-ascend re-trigger star milestones from 0.
+    inv.legacy.last_awarded_level = 0;
     save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }

@@ -91,7 +91,12 @@ where
 
     html! {
         <button class={classes.join(" ")} disabled={disabled} onclick={cb}>
-            <span class="area-name">{ area_name(locale, area) }</span>
+            <span class="area-name">
+                { area_name(locale, area) }
+                <span class="area-level-badge" title="recommended hero level">
+                    { format!("lv {}", area.min_level) }
+                </span>
+            </span>
             <span class="area-blurb muted">{ area_blurb(locale, area) }</span>
             { footer }
         </button>

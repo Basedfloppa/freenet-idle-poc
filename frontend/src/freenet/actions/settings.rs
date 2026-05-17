@@ -55,6 +55,11 @@ pub struct Settings {
     /// even though the delegate still has the same offline window
     /// in persisted state.
     pub last_catchup_acked_started_ms: Option<u64>,
+    /// Auto-mission HP pause threshold (0..=95). Persisted on the
+    /// delegate because the sandboxed webapp iframe's localStorage
+    /// is null-origin — without this field the picker resets to 0
+    /// after every reload.
+    pub auto_pause_hp_pct: Option<u8>,
 }
 
 /// Load the delegate-persisted settings blob and mirror its fields
@@ -135,6 +140,7 @@ pub fn save_settings_once(
     locale_override: Option<String>,
     last_seen_version_override: Option<String>,
     last_catchup_acked_override: Option<u64>,
+    auto_pause_hp_pct_override: Option<u8>,
 ) {
     let (ws, delegate_key, payload) = {
         let g = core.borrow();
@@ -160,6 +166,8 @@ pub fn save_settings_once(
         let last_catchup_acked_started_ms = last_catchup_acked_override
             .map(Some)
             .unwrap_or_else(|| Some(c.last_catchup_acked_started_ms));
+        let auto_pause_hp_pct = auto_pause_hp_pct_override
+            .or(Some(c.prefs.auto_pause_hp_pct));
         let settings = Settings {
             display_name,
             theme,
@@ -167,6 +175,7 @@ pub fn save_settings_once(
             locale,
             last_seen_version,
             last_catchup_acked_started_ms,
+            auto_pause_hp_pct,
         };
         let payload = match serde_json::to_vec(&settings) {
             Ok(b) => b,
@@ -223,7 +232,7 @@ fn apply_settings(c: &mut crate::app::Core, settings: Settings) {
         }
     }
     if let Some(code) = settings.locale.as_deref() {
-        if matches!(code, "en" | "ru" | "de") {
+        if crate::app::i18n_loader::is_known(code) {
             c.prefs.locale = locale_from_code(code);
             save_prefs(&c.prefs);
         }
@@ -236,5 +245,9 @@ fn apply_settings(c: &mut crate::app::Core, settings: Settings) {
     }
     if let Some(t) = settings.last_catchup_acked_started_ms {
         c.last_catchup_acked_started_ms = t;
+    }
+    if let Some(pct) = settings.auto_pause_hp_pct {
+        c.prefs.auto_pause_hp_pct = pct;
+        save_prefs(&c.prefs);
     }
 }

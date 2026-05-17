@@ -71,15 +71,18 @@ impl InsightNode {
         }
     }
 
-    /// Cost in insight for the *next* level. Linear in node level
-    /// for the first ~10 levels, then sublinear cap. Insight is
-    /// rare, so we don't need an exponential curve.
+    /// Cost in insight for the *next* level. Strictly monotonically
+    /// rising (no soft cap) — insight is a permanent currency that
+    /// keeps trickling in, so the curve has to keep growing to avoid
+    /// trivialising late-game nodes. Linear ramp `lvl + 1` for the
+    /// first 10 levels, then a quadratic tail beyond so a level-100
+    /// node still costs proportionally more than a level-10 one.
     pub fn next_cost(self, current_level: u64) -> u64 {
-        // 1, 2, 3, … up to a soft cap of 5 per level after lvl 10.
-        match current_level {
-            0..=9 => current_level + 1,
-            _ => 5,
+        if current_level < 10 {
+            return current_level + 1;
         }
+        let over = current_level.saturating_sub(9);
+        10u64.saturating_add(over.saturating_mul(over))
     }
 }
 

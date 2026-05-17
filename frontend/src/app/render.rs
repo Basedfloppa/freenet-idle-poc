@@ -95,6 +95,7 @@ pub fn render_core(
                 None,
                 None,
                 None,
+                None,
             );
             bump.set(now_ms());
         })
@@ -736,6 +737,7 @@ pub fn render_core(
                     None,
                     None,
                     None,
+                    None,
                 );
                 bump.set(now_ms());
             })
@@ -772,6 +774,7 @@ pub fn render_core(
                     Some(code.to_string()),
                     None,
                     None,
+                    None,
                 );
                 bump.set(now_ms());
             })
@@ -799,15 +802,32 @@ pub fn render_core(
 
     let mk_hp_pause_cb = {
         let core = core_cell.clone();
+        let pending = pending.clone();
         let bump = bump.clone();
         move |pct: u8| {
             let core = core.clone();
+            let pending = pending.clone();
             let bump = bump.clone();
             Callback::from(move |_: MouseEvent| {
                 if let Some(c) = core.borrow_mut().as_mut() {
                     c.prefs.auto_pause_hp_pct = pct;
                     save_prefs(&c.prefs);
                 }
+                // Mirror the picker onto the delegate-side Settings
+                // blob so the value survives a reload in the
+                // null-origin sandbox iframe.
+                crate::freenet::actions::settings::save_settings_once(
+                    core.clone(),
+                    pending.clone(),
+                    bump.clone(),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some(pct),
+                );
                 bump.set(now_ms());
             })
         }
@@ -967,6 +987,7 @@ pub fn render_core(
                     None,
                     None,
                     None,
+                    None,
                 );
             }
             bump.set(now_ms());
@@ -987,6 +1008,7 @@ pub fn render_core(
                 None,
                 None,
                 Some(true),
+                None,
                 None,
                 None,
                 None,
@@ -1025,6 +1047,7 @@ pub fn render_core(
                 None,
                 Some(version),
                 Some(acked_ts),
+                None,
             );
             bump.set(now_ms());
         })
@@ -1608,10 +1631,16 @@ pub fn render_core(
                             }
                         </section>
 
-                        // Phased reveal (A5): World Boss panel
-                        // appears at mission_count ≥ 10.
+                        // Phased reveal (A5): World Boss panel appears
+                        // at mission_count ≥ 10, but only while the
+                        // player is actually on a boss-contact area
+                        // (`damage_mult > 0`) — non-boss zones hide
+                        // the HP gauge so the panel doesn't claim
+                        // relevance from areas that can't chip it.
                         {
-                            if inv.revealed_has(shared::RevealKey::WorldBoss) {
+                            if inv.revealed_has(shared::RevealKey::WorldBoss)
+                                && area.damage_mult > 0
+                            {
                                 html! {
                                     <section class={classes!("panel", "boss", anim_cls(shared::RevealKey::WorldBoss))}>
                                         <h2>{ locale.tr(MessageId::PanelWorldBoss) }</h2>
@@ -2820,17 +2849,23 @@ fn render_tokens_panel(
                                 )
                             })
                         };
+                        let name_key = format!("token_perk_name.{}", perk.key());
+                        let desc_key = format!("token_perk_desc.{}", perk.key());
+                        let name_tr = locale.tr_key(&name_key);
+                        let desc_tr = locale.tr_key(&desc_key);
+                        let perk_name = if name_tr.starts_with('?') { perk.name() } else { name_tr };
+                        let perk_desc = if desc_tr.starts_with('?') { perk.description() } else { desc_tr };
                         html! {
-                            <tr title={perk.description()}>
+                            <tr title={perk_desc}>
                                 <td>
-                                    <div>{ perk.name() }</div>
-                                    <div class="muted small">{ perk.description() }</div>
+                                    <div>{ perk_name }</div>
+                                    <div class="muted small">{ perk_desc }</div>
                                 </td>
                                 <td class="num">{ price }</td>
                                 <td>
                                     <button onclick={cb} disabled={disabled}>
                                         { if owned {
-                                            locale.tr(MessageId::TipFormAlreadyActive)
+                                            locale.tr(MessageId::TermOwned)
                                         } else {
                                             locale.tr(MessageId::BtnUnlock)
                                         } }

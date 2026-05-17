@@ -24,7 +24,12 @@ pub fn equipped_bonuses(inv: &Inventory) -> (u64, u64, u64) {
             }
         }
     }
-    (atk, def, hp)
+    let mult_bp = inv.tokens.gear_mult_bp();
+    (
+        atk.saturating_mul(mult_bp) / 10_000,
+        def.saturating_mul(mult_bp) / 10_000,
+        hp.saturating_mul(mult_bp) / 10_000,
+    )
 }
 
 /// Total bonus across equipment + form + skills. Single source of

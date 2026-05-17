@@ -37,25 +37,29 @@ pub fn boss_kill_tokens_for_rank(rank: u8) -> u64 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum TokenPerk {
-    /// Show a "champion" badge on the player's leaderboard row.
-    /// Pure cosmetic; one purchase unlocks it forever.
+    /// Champion badge — cosmetic marker on the leaderboard row.
     ChampionBadge = 0,
-    /// Extra equipped-gear slot (`SLOT_COUNT + 1`). Currently
-    /// not wired into the slot mask — the perk just records the
-    /// purchase; the slot extension lands as a follow-up when
-    /// gear-mask plumbing supports a 9th slot.
-    ExtraSlot = 1,
-    /// Second auto-mission preset (the "farm mode vs exp mode"
-    /// switcher). Like ExtraSlot, the perk records the purchase
-    /// today; the preset switcher is a frontend follow-up.
-    SecondAutoPreset = 2,
+    /// +20% gear stat contribution for every equipped piece.
+    /// Stacks multiplicatively after Legacy nodes and Insight.
+    GearMastery = 1,
+    /// Doubles the World Boss damage dealt by every mission
+    /// (mission_damage × 2 from the boss-contact area `damage_mult`).
+    BossFury = 2,
+    /// +1 potion dropped every `POTION_DROP_EVERY` missions
+    /// (so the cadence becomes 2 instead of 1).
+    AlchemistTrust = 3,
+    /// +50% gold from every encounter. Applies after Legacy
+    /// MissionGold and Insight GoldDropPct so it compounds.
+    MerchantSeal = 4,
 }
 
 impl TokenPerk {
     pub const ALL: &'static [TokenPerk] = &[
         TokenPerk::ChampionBadge,
-        TokenPerk::ExtraSlot,
-        TokenPerk::SecondAutoPreset,
+        TokenPerk::GearMastery,
+        TokenPerk::BossFury,
+        TokenPerk::AlchemistTrust,
+        TokenPerk::MerchantSeal,
     ];
 
     pub fn id(self) -> u8 {
@@ -65,17 +69,33 @@ impl TokenPerk {
     pub fn from_id(id: u8) -> Option<TokenPerk> {
         match id {
             0 => Some(TokenPerk::ChampionBadge),
-            1 => Some(TokenPerk::ExtraSlot),
-            2 => Some(TokenPerk::SecondAutoPreset),
+            1 => Some(TokenPerk::GearMastery),
+            2 => Some(TokenPerk::BossFury),
+            3 => Some(TokenPerk::AlchemistTrust),
+            4 => Some(TokenPerk::MerchantSeal),
             _ => None,
         }
     }
 
+    /// JSON i18n key tail (`token_perk_name.<key>` / `token_perk_desc.<key>`).
+    pub fn key(self) -> &'static str {
+        match self {
+            TokenPerk::ChampionBadge => "champion_badge",
+            TokenPerk::GearMastery => "gear_mastery",
+            TokenPerk::BossFury => "boss_fury",
+            TokenPerk::AlchemistTrust => "alchemist_trust",
+            TokenPerk::MerchantSeal => "merchant_seal",
+        }
+    }
+
+    /// English fallback shown if no translation is loaded.
     pub fn name(self) -> &'static str {
         match self {
             TokenPerk::ChampionBadge => "Champion badge",
-            TokenPerk::ExtraSlot => "Extra gear slot",
-            TokenPerk::SecondAutoPreset => "Second auto-mission preset",
+            TokenPerk::GearMastery => "Gear mastery (+20% gear stats)",
+            TokenPerk::BossFury => "Boss fury (×2 mission boss damage)",
+            TokenPerk::AlchemistTrust => "Alchemist's trust (×2 potion drops)",
+            TokenPerk::MerchantSeal => "Merchant's seal (+50% encounter gold)",
         }
     }
 
@@ -83,20 +103,26 @@ impl TokenPerk {
         match self {
             TokenPerk::ChampionBadge =>
                 "Cosmetic marker on your leaderboard row showing you've cleared the boss-damage milestone tree.",
-            TokenPerk::ExtraSlot =>
-                "Reserves a 9th equipment slot for a future gear-mask expansion. Cosmetic for now.",
-            TokenPerk::SecondAutoPreset =>
-                "Unlocks the slot for a second auto-mission preset (separate HP threshold + area). UI for switching the preset lands as a follow-up.",
+            TokenPerk::GearMastery =>
+                "Multiplies the attack/defence/HP bonuses from every equipped piece by 1.20. Stacks multiplicatively with Legacy nodes and Insight.",
+            TokenPerk::BossFury =>
+                "Doubles the mission boss damage you contribute on every encounter at a boss-contact area.",
+            TokenPerk::AlchemistTrust =>
+                "Doubles the potion drop cadence — one potion per POTION_DROP_EVERY missions becomes two.",
+            TokenPerk::MerchantSeal =>
+                "Adds +50% to every encounter's gold reward. Compounds with Legacy MissionGold and Insight GoldDropPct.",
         }
     }
 
-    /// One-shot price in tokens. No level curve for cosmetics —
-    /// each perk is either unlocked or not.
+    /// One-shot price in tokens. Higher-impact perks cost more
+    /// since they affect gameplay rather than cosmetics.
     pub fn price(self) -> u64 {
         match self {
             TokenPerk::ChampionBadge => 1,
-            TokenPerk::ExtraSlot => 5,
-            TokenPerk::SecondAutoPreset => 3,
+            TokenPerk::AlchemistTrust => 3,
+            TokenPerk::MerchantSeal => 5,
+            TokenPerk::GearMastery => 8,
+            TokenPerk::BossFury => 10,
         }
     }
 }
@@ -117,5 +143,27 @@ pub struct TokenState {
 impl TokenState {
     pub fn owns(&self, perk: TokenPerk) -> bool {
         self.perks.contains_key(&perk.id())
+    }
+
+    /// Multiplier in basis points (10_000 = ×1.0) applied to
+    /// equipment-bonus totals when GearMastery is owned.
+    pub fn gear_mult_bp(&self) -> u64 {
+        if self.owns(TokenPerk::GearMastery) { 12_000 } else { 10_000 }
+    }
+
+    /// Multiplier in basis points for boss damage per mission.
+    pub fn boss_damage_mult_bp(&self) -> u64 {
+        if self.owns(TokenPerk::BossFury) { 20_000 } else { 10_000 }
+    }
+
+    /// Multiplier in basis points for encounter gold.
+    pub fn gold_mult_bp(&self) -> u64 {
+        if self.owns(TokenPerk::MerchantSeal) { 15_000 } else { 10_000 }
+    }
+
+    /// Number of potions dropped at every `POTION_DROP_EVERY`
+    /// milestone (1 by default, 2 with AlchemistTrust).
+    pub fn potion_drop_count(&self) -> u32 {
+        if self.owns(TokenPerk::AlchemistTrust) { 2 } else { 1 }
     }
 }

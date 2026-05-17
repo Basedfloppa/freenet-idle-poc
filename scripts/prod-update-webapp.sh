@@ -100,7 +100,52 @@ fi
 echo
 echo "[prod-update] trunk build --release"
 cd "$HERE/frontend"
+
+# Refuse to run while `trunk serve` is active. The dev-server watches
+# the same `dist/` dir and races our release build — observed
+# 2026-05-16 to produce a 2-file dist (just index.html + dev-mode
+# WASM) at the moment fdev packs the tarball, since the dev-server
+# overwrites dist before fdev finishes scanning. Result: state in
+# DB only contains 2 files, every other asset 404s in browser.
+if pgrep -f "trunk serve" >/dev/null 2>&1; then
+    echo "[prod-update] trunk serve is running — kill it before publishing."
+    echo "[prod-update]   pkill -f 'trunk serve'"
+    echo "[prod-update] (the dev-server overwrites dist/ mid-build and produces"
+    echo "[prod-update]  an incomplete tarball — see commit-message for context)."
+    exit 1
+fi
+
 trunk build --release
+
+# Sanity: dist must contain BOTH trunk-emitted assets AND the
+# copy-file-staged contract/delegate WASMs. trunk's `data-trunk
+# rel="copy-file"` rules silently skip missing source files, and an
+# interrupted prior build can leave dist with only the rust-binary
+# outputs. We've shipped this exact malformed bundle once — let's
+# not do it twice.
+EXPECTED_FILES=(
+    "dist/index.html"
+    "dist/style-"
+    "dist/frontend-"
+    "dist/identity_delegate.wasm"
+    "dist/presence_contract.wasm"
+    "dist/dev-keys.json"
+)
+MISSING=()
+for pat in "${EXPECTED_FILES[@]}"; do
+    if ! compgen -G "${pat}*" >/dev/null; then
+        MISSING+=("$pat")
+    fi
+done
+if (( ${#MISSING[@]} > 0 )); then
+    echo "[prod-update] dist/ is missing expected files after trunk build:"
+    for m in "${MISSING[@]}"; do echo "    $m*"; done
+    echo "[prod-update] re-run scripts/prod-publish.sh to re-stage the contract WASMs,"
+    echo "[prod-update] then retry this script."
+    exit 1
+fi
+DIST_FILE_COUNT="$(find dist -maxdepth 1 -type f | wc -l)"
+echo "[prod-update] dist/ has $DIST_FILE_COUNT files — looks complete"
 
 echo
 echo "[prod-update] fdev website update"

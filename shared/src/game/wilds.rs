@@ -83,39 +83,62 @@ pub fn wilds_areas(seed: u32) -> Vec<AreaDef> {
 }
 
 /// The Wilds names get baked into `&'static str` slots on the
-/// returned `AreaDef`. Easiest way to satisfy the lifetime is
-/// to leak into a small interned pool — the table is tiny
-/// (8 nodes × ~12 names), the allocation happens once per
-/// session, and never freeing is fine because the generator
-/// lives for the page lifetime.
+/// returned `AreaDef`. The string itself is a stable marker
+/// `wilds:<root>:<suffix>` — the frontend's i18n layer detects
+/// the prefix and assembles a localized name from translated
+/// ROOTS/SUFFIXES JSON tables (key `wilds_root.<r>` /
+/// `wilds_suffix.<s>`), falling back to the English wordlist
+/// when no translation is registered. The pool is tiny (8 nodes
+/// per player), allocation happens once per session, and never
+/// freeing is fine because the generator lives for the page
+/// lifetime.
+pub const WILDS_ROOTS_EN: [&str; 12] = [
+    "Thorn", "Glade", "Hollow", "Reach", "Mire", "Veil",
+    "Spire", "Wend", "Crag", "Wisp", "Drift", "Pall",
+];
+pub const WILDS_SUFFIXES_EN: [&str; 12] = [
+    "Wood", "Hill", "Pass", "Fen", "Crossing", "Cradle",
+    "Spur", "Ridge", "Hollow", "Vale", "Knoll", "Cleft",
+];
+
 fn wilds_name(id: u32, rng: &mut WildsRng) -> &'static str {
-    const ROOTS: [&str; 12] = [
-        "Thorn", "Glade", "Hollow", "Reach", "Mire", "Veil",
-        "Spire", "Wend", "Crag", "Wisp", "Drift", "Pall",
-    ];
-    const SUFFIXES: [&str; 12] = [
-        "Wood", "Hill", "Pass", "Fen", "Crossing", "Cradle",
-        "Spur", "Ridge", "Hollow", "Vale", "Knoll", "Cleft",
-    ];
-    let r = (rng.next() ^ id) as usize;
-    let s = (rng.next() ^ id.rotate_left(7)) as usize;
-    let root = ROOTS[r % ROOTS.len()];
-    let suffix = SUFFIXES[s % SUFFIXES.len()];
-    let combined = format!("{root}{suffix}");
-    Box::leak(combined.into_boxed_str())
+    let r = (rng.next() ^ id) as usize % WILDS_ROOTS_EN.len();
+    let s = (rng.next() ^ id.rotate_left(7)) as usize % WILDS_SUFFIXES_EN.len();
+    let marker = format!("wilds:{r}:{s}");
+    Box::leak(marker.into_boxed_str())
 }
 
-fn wilds_blurb(name: &'static str, id: u32) -> &'static str {
-    const ATMOS: [&str; 6] = [
-        "off-path, unmarked on the village map",
-        "moss-thick and breath-quiet between the columns of stone",
-        "where the path forks back on itself if you blink wrong",
-        "the wind here sounds like other people's footsteps",
-        "old battle ground — the ghosts are uninterested but watching",
-        "places named here only when you've stayed past dusk",
-    ];
-    let blurb = format!("{} — {}", name, ATMOS[(id as usize) % ATMOS.len()]);
-    Box::leak(blurb.into_boxed_str())
+/// Reverse of `wilds_name`'s marker encoding — extract
+/// `(root_idx, suffix_idx)` so the frontend can rebuild a
+/// localized name. Returns `None` if the slot doesn't carry
+/// a Wilds marker (linear areas).
+pub fn parse_wilds_name(s: &str) -> Option<(usize, usize)> {
+    let mut parts = s.strip_prefix("wilds:")?.split(':');
+    let r: usize = parts.next()?.parse().ok()?;
+    let s: usize = parts.next()?.parse().ok()?;
+    Some((r, s))
+}
+
+/// Fallback English name assembled from the static wordlists.
+pub fn wilds_default_name(root_idx: usize, suffix_idx: usize) -> String {
+    let r = WILDS_ROOTS_EN.get(root_idx).copied().unwrap_or("Wilds");
+    let s = WILDS_SUFFIXES_EN.get(suffix_idx).copied().unwrap_or("Reach");
+    format!("{r}{s}")
+}
+
+fn wilds_blurb(_name: &'static str, id: u32) -> &'static str {
+    // Encode the atmosphere index as a marker (`wildsblurb:<idx>`)
+    // so the i18n layer can swap the body in the active locale.
+    // Both name and blurb resolve at display time — keeping the
+    // procedural seed deterministic without baking English copy
+    // into the AreaDef slot.
+    let idx = (id as usize) % 6;
+    let marker = format!("wildsblurb:{idx}");
+    Box::leak(marker.into_boxed_str())
+}
+
+pub fn parse_wilds_blurb(s: &str) -> Option<usize> {
+    s.strip_prefix("wildsblurb:")?.parse().ok()
 }
 
 fn leak_predecessors(preds: &[u8]) -> &'static [u8] {

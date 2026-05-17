@@ -22,15 +22,83 @@ pub fn form_name(locale: Locale, form: u8) -> &'static str {
 }
 
 pub fn area_name(locale: Locale, area: &AreaDef) -> &'static str {
+    // Wilds nodes carry a `wilds:<r>:<s>` marker in their static
+    // `name` slot — assemble a locale-aware name from
+    // `wilds_root.<r>` + `wilds_suffix.<s>`, falling back to the
+    // English wordlists. The assembled name is leaked once per
+    // (locale, area_id) so callers still get a `'static` slice.
+    if let Some((r, s)) = shared::parse_wilds_name(area.name) {
+        return cached_wilds_name(locale, area.id, r, s);
+    }
     let key = format!("area_name.{}", area.id);
     let v = i18n_loader::tr(locale.as_str(), &key);
     if v.starts_with('?') { area.name } else { v }
 }
 
 pub fn area_blurb(locale: Locale, area: &AreaDef) -> &'static str {
+    if let Some(idx) = shared::parse_wilds_blurb(area.blurb) {
+        return cached_wilds_blurb(locale, area.id, idx);
+    }
     let key = format!("area_blurb.{}", area.id);
     let v = i18n_loader::tr(locale.as_str(), &key);
     if v.starts_with('?') { area.blurb } else { v }
+}
+
+/// Assemble + intern a localized Wilds name. The `(locale,
+/// area_id)` key is the cache index so a player switching locales
+/// at runtime sees an up-to-date name; the table is bounded by
+/// `locales × WILDS_NODE_COUNT` (≈ 6 × 8 = 48) so the leak budget
+/// is trivial.
+fn cached_wilds_name(locale: Locale, area_id: u8, r: usize, s: usize) -> &'static str {
+    static CACHE: once_cell::sync::Lazy<
+        std::sync::Mutex<std::collections::HashMap<(&'static str, u8), &'static str>>,
+    > = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let key = (locale.as_str(), area_id);
+    let mut guard = CACHE.lock().unwrap();
+    if let Some(&v) = guard.get(&key) {
+        return v;
+    }
+    let root_key = format!("wilds_root.{r}");
+    let suffix_key = format!("wilds_suffix.{s}");
+    let root = i18n_loader::tr(locale.as_str(), &root_key);
+    let suffix = i18n_loader::tr(locale.as_str(), &suffix_key);
+    let root = if root.starts_with('?') {
+        shared::WILDS_ROOTS_EN.get(r).copied().unwrap_or("Wilds")
+    } else { root };
+    let suffix = if suffix.starts_with('?') {
+        shared::WILDS_SUFFIXES_EN.get(s).copied().unwrap_or("Reach")
+    } else { suffix };
+    let assembled: &'static str = Box::leak(format!("{root} {suffix}").into_boxed_str());
+    guard.insert(key, assembled);
+    assembled
+}
+
+fn cached_wilds_blurb(locale: Locale, area_id: u8, idx: usize) -> &'static str {
+    static CACHE: once_cell::sync::Lazy<
+        std::sync::Mutex<std::collections::HashMap<(&'static str, u8), &'static str>>,
+    > = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let key = (locale.as_str(), area_id);
+    let mut guard = CACHE.lock().unwrap();
+    if let Some(&v) = guard.get(&key) {
+        return v;
+    }
+    let body_key = format!("wilds_atmos.{idx}");
+    let body = i18n_loader::tr(locale.as_str(), &body_key);
+    let body = if body.starts_with('?') {
+        // English fallback — keep the original atmosphere list inline
+        // so an out-of-date locale still reads coherently.
+        match idx {
+            0 => "off-path, unmarked on the village map",
+            1 => "moss-thick and breath-quiet between the columns of stone",
+            2 => "where the path forks back on itself if you blink wrong",
+            3 => "the wind here sounds like other people's footsteps",
+            4 => "old battle ground — the ghosts are uninterested but watching",
+            _ => "places named here only when you've stayed past dusk",
+        }
+    } else { body };
+    let assembled: &'static str = Box::leak(body.to_string().into_boxed_str());
+    guard.insert(key, assembled);
+    assembled
 }
 
 pub fn enemy_name(locale: Locale, enemy: &EnemyDef) -> &'static str {
