@@ -489,5 +489,21 @@
   "token_perk_desc.gear_mastery": "Multiplica los bonos de atk/def/HP de cada pieza equipada por 1,20. Se acumula con Legacy y Perspicacia.",
   "token_perk_desc.boss_fury": "Duplica el daño que aportas al jefe por cada combate en una zona con contacto.",
   "token_perk_desc.alchemist_trust": "Duplica la cadencia de caída de pociones — una poción cada POTION_DROP_EVERY misiones se convierte en dos.",
-  "token_perk_desc.merchant_seal": "+50% al oro de cada encuentro. Se compone con Legacy MissionGold e Insight GoldDropPct."
+  "token_perk_desc.merchant_seal": "+50% al oro de cada encuentro. Se compone con Legacy MissionGold e Insight GoldDropPct.",
+  "estate_tier_name.0": "Bracero",
+  "estate_tier_name.1": "Recolector",
+  "estate_tier_name.2": "Mercader",
+  "estate_tier_name.3": "Sabio",
+  "legacy_node_name.hero_attack": "Ataque del héroe",
+  "legacy_node_name.estate_yield": "Rendimiento de la hacienda",
+  "legacy_node_name.mission_gold": "Oro de misión",
+  "legacy_node_desc.hero_attack": "Multiplica el ataque base + bonificado del héroe por +5% por nivel. Se acumula multiplicativamente tras equipo / forma / habilidades.",
+  "legacy_node_desc.estate_yield": "Multiplica el rendimiento de los trabajadores de la hacienda por +10% por nivel. Se combina multiplicativamente con la afinidad de forma.",
+  "legacy_node_desc.mission_gold": "Multiplica el oro ganado por encuentro en +5% por nivel. Aplica tanto a RunMission como a victorias en auto-misión.",
+  "insight_node_name.hp_per_level": "+1 PV por nivel",
+  "insight_node_name.gold_drop_pct": "+1% de oro",
+  "insight_node_name.form_affinity": "Sesgo de afinidad de forma",
+  "insight_node_desc.hp_per_level": "Añade 1 PV por nivel del héroe por nivel del nodo. Por encima de la curva base 5 PV/nivel — más eficaz en el late-game.",
+  "insight_node_desc.gold_drop_pct": "Añade +1% por nivel del nodo a cada recompensa de oro. Se compone multiplicativamente con Legacy MissionGold y area gold_mult.",
+  "insight_node_desc.form_affinity": "Estira la tabla de afinidad de la forma actual — los bonos crecen +10% por nivel del nodo, las penalizaciones se reducen +5%. Premia la especialización."
 }

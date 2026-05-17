@@ -495,5 +495,21 @@
   "token_perk_desc.gear_mastery": "Multipliziert Angriff/Verteidigung/HP jedes angelegten Teils mit 1,20. Stapelt multiplikativ mit Legacy-Knoten und Einsicht.",
   "token_perk_desc.boss_fury": "Verdoppelt deinen Boss-Schaden pro Encounter in einem Boss-Kontaktgebiet.",
   "token_perk_desc.alchemist_trust": "Verdoppelt die Tränke-Drop-Kadenz — aus einem Trank pro POTION_DROP_EVERY werden zwei.",
-  "token_perk_desc.merchant_seal": "+50% auf jede Encounter-Goldbelohnung. Multipliziert mit Legacy MissionGold und Insight GoldDropPct."
+  "token_perk_desc.merchant_seal": "+50% auf jede Encounter-Goldbelohnung. Multipliziert mit Legacy MissionGold und Insight GoldDropPct.",
+  "estate_tier_name.0": "Landarbeiter",
+  "estate_tier_name.1": "Sammler",
+  "estate_tier_name.2": "Händler",
+  "estate_tier_name.3": "Weiser",
+  "legacy_node_name.hero_attack": "Helden-Angriff",
+  "legacy_node_name.estate_yield": "Gutshof-Ertrag",
+  "legacy_node_name.mission_gold": "Missions-Gold",
+  "legacy_node_desc.hero_attack": "Multipliziert Basis + Bonus-Angriff des Helden um +5% pro Stufe. Stapelt multiplikativ nach Ausrüstung / Form / Skills.",
+  "legacy_node_desc.estate_yield": "Multipliziert den Ertrag der Gutshof-Arbeiter um +10% pro Stufe. Kombiniert sich multiplikativ mit der Formaffinität.",
+  "legacy_node_desc.mission_gold": "Multipliziert das pro Encounter erhaltene Gold um +5% pro Stufe. Gilt sowohl für RunMission als auch für Auto-Missions-Siege.",
+  "insight_node_name.hp_per_level": "+1 LP pro Stufe",
+  "insight_node_name.gold_drop_pct": "+1% Gold-Drop",
+  "insight_node_name.form_affinity": "Formaffinitäts-Bias",
+  "insight_node_desc.hp_per_level": "Fügt 1 LP pro Heldenstufe pro Knoten-Stufe hinzu. Liegt über der Basis-Kurve 5 LP/Stufe — am wirkungsvollsten im Late-Game.",
+  "insight_node_desc.gold_drop_pct": "Fügt pro Knoten-Stufe +1% zu jeder Gold-Belohnung im Encounter hinzu. Verbindet sich multiplikativ mit Legacy MissionGold und area gold_mult.",
+  "insight_node_desc.form_affinity": "Streckt die Gutshof-Affinitätstabelle der aktuellen Form — Buffs wachsen um +10% pro Knoten-Stufe, Strafen schrumpfen um +5%. Belohnt Spezialisierung."
 }

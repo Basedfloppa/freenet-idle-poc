@@ -252,7 +252,10 @@ pub fn render_catchup_modal(
                 if n == 0 {
                     return None;
                 }
-                Some(html! { <li>{ locale.fmt_estate_worker_line(tier.name, n) }</li> })
+                let tier_key = format!("estate_tier_name.{}", tier.id);
+                let tier_name_tr = locale.tr_key(&tier_key);
+                let tier_label: &str = if tier_name_tr.starts_with('?') { tier.name } else { tier_name_tr };
+                Some(html! { <li>{ locale.fmt_estate_worker_line(tier_label, n) }</li> })
             })
             .collect();
         html! {

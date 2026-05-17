@@ -489,5 +489,21 @@
   "token_perk_desc.gear_mastery": "装備の攻撃/防御/HP補正をそれぞれ×1.20。Legacy と Insight に乗算的に重なります。",
   "token_perk_desc.boss_fury": "ボス接触エリアでの各エンカウンターのボスダメージを倍化。",
   "token_perk_desc.alchemist_trust": "ポーションのドロップ頻度を倍化 — POTION_DROP_EVERY ミッションごとに 2 個。",
-  "token_perk_desc.merchant_seal": "各エンカウンターの金報酬に+50%。Legacy MissionGold と Insight GoldDropPct と乗算的に組み合わさる。"
+  "token_perk_desc.merchant_seal": "各エンカウンターの金報酬に+50%。Legacy MissionGold と Insight GoldDropPct と乗算的に組み合わさる。",
+  "estate_tier_name.0": "農夫",
+  "estate_tier_name.1": "採集者",
+  "estate_tier_name.2": "商人",
+  "estate_tier_name.3": "賢者",
+  "legacy_node_name.hero_attack": "ヒーローの攻撃",
+  "legacy_node_name.estate_yield": "領地の収益",
+  "legacy_node_name.mission_gold": "ミッションの金",
+  "legacy_node_desc.hero_attack": "ヒーローの基本+ボーナス攻撃をレベルごとに+5%する。装備/形態/スキルの後に乗算的に重なる。",
+  "legacy_node_desc.estate_yield": "領地労働者の収益をレベルごとに+10%する。形態アフィニティと乗算的に組み合わさる。",
+  "legacy_node_desc.mission_gold": "エンカウンターごとの金獲得量をレベルごとに+5%する。RunMission と オートミッションの勝利の両方に適用。",
+  "insight_node_name.hp_per_level": "+1 HP/レベル",
+  "insight_node_name.gold_drop_pct": "+1% 金ドロップ",
+  "insight_node_name.form_affinity": "形態アフィニティのバイアス",
+  "insight_node_desc.hp_per_level": "ヒーローレベルごとにノードレベル分の 1 HP を加算。基本曲線 5 HP/レベル の上に乗るので、終盤に最も効果的。",
+  "insight_node_desc.gold_drop_pct": "ノードレベルごとに各エンカウンターの金報酬に +1% を追加。Legacy MissionGold と area gold_mult と乗算的に組み合わさる。",
+  "insight_node_desc.form_affinity": "現在の形態の領地アフィニティ表を拡張 — ノードレベルごとにバフが +10% 増え、ペナルティが +5% 縮む。特化を奨励する。"
 }

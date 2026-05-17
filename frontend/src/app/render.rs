@@ -1367,7 +1367,22 @@ pub fn render_core(
                         }
                         <section class="grid-3">
                             <article class="panel stats">
-                                <h2>{ locale.tr(MessageId::PanelHero) }</h2>
+                                <h2>
+                                    { locale.tr(MessageId::PanelHero) }
+                                    {
+                                        // Champion badge perk (C2 tokens) — shows a
+                                        // permanent marker on the Hero panel header
+                                        // once the player owns it.
+                                        if inv.tokens.owns(shared::TokenPerk::ChampionBadge) {
+                                            html! {
+                                                <span
+                                                    class="champion-badge"
+                                                    title={ locale.tr_key("token_perk_name.champion_badge") }
+                                                >{ "🏆" }</span>
+                                            }
+                                        } else { html! {} }
+                                    }
+                                </h2>
                                 <div class="stat-row">
                                     <label>{ format!("{} ", locale.tr(MessageId::StatName)) }
                                         <input type="text" value={c.name.clone()} oninput={on_name} />
@@ -1729,9 +1744,12 @@ pub fn render_core(
                                                     };
                                                     let buy_disabled = inv.gold < next_price;
                                                     let onbuy = mk_buy_worker_cb(tier.id);
+                                                    let tier_key = format!("estate_tier_name.{}", tier.id);
+                                                    let tier_name_tr = locale.tr_key(&tier_key);
+                                                    let tier_label: &str = if tier_name_tr.starts_with('?') { tier.name } else { tier_name_tr };
                                                     html! {
                                                         <tr>
-                                                            <td>{ tier.name }</td>
+                                                            <td>{ tier_label }</td>
                                                             <td class="num">{ owned }</td>
                                                             <td class="num">
                                                                 { format!("{} {}", effective_yield, res_label) }
@@ -2574,11 +2592,17 @@ where
                             mult_bp / 10_000,
                             (mult_bp % 10_000) / 100,
                         );
+                        let name_key = format!("legacy_node_name.{}", node.key());
+                        let desc_key = format!("legacy_node_desc.{}", node.key());
+                        let name_tr = locale.tr_key(&name_key);
+                        let desc_tr = locale.tr_key(&desc_key);
+                        let node_name: &str = if name_tr.starts_with('?') { node.name() } else { name_tr };
+                        let node_desc: &str = if desc_tr.starts_with('?') { node.description() } else { desc_tr };
                         html! {
-                            <tr title={node.description()}>
+                            <tr title={node_desc}>
                                 <td>
-                                    <div>{ node.name() }</div>
-                                    <div class="muted small">{ node.description() }</div>
+                                    <div>{ node_name }</div>
+                                    <div class="muted small">{ node_desc }</div>
                                 </td>
                                 <td class="num">{ lvl }</td>
                                 <td class="num">{ mult_label }</td>
@@ -2662,9 +2686,12 @@ fn render_routine_panel(
                                 )
                             })
                         };
+                        let tier_key = format!("estate_tier_name.{}", tier.id);
+                        let tier_name_tr = locale.tr_key(&tier_key);
+                        let tier_label: &str = if tier_name_tr.starts_with('?') { tier.name } else { tier_name_tr };
                         html! {
                             <tr>
-                                <td>{ tier.name }</td>
+                                <td>{ tier_label }</td>
                                 <td class="num">{ owned }</td>
                                 <td class="num">{ target }</td>
                                 <td>
@@ -2729,11 +2756,17 @@ fn render_insight_panel(
                                 )
                             })
                         };
+                        let name_key = format!("insight_node_name.{}", node.key());
+                        let desc_key = format!("insight_node_desc.{}", node.key());
+                        let name_tr = locale.tr_key(&name_key);
+                        let desc_tr = locale.tr_key(&desc_key);
+                        let node_name: &str = if name_tr.starts_with('?') { node.name() } else { name_tr };
+                        let node_desc: &str = if desc_tr.starts_with('?') { node.description() } else { desc_tr };
                         html! {
-                            <tr title={node.description()}>
+                            <tr title={node_desc}>
                                 <td>
-                                    <div>{ node.name() }</div>
-                                    <div class="muted small">{ node.description() }</div>
+                                    <div>{ node_name }</div>
+                                    <div class="muted small">{ node_desc }</div>
                                 </td>
                                 <td class="num">{ lvl }</td>
                                 <td class="num">{ cost }</td>

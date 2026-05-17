@@ -52,6 +52,17 @@ impl InsightNode {
         }
     }
 
+    /// Stable i18n key for `insight_node_name.<key>` /
+    /// `insight_node_desc.<key>`. Lowercase snake-case, never
+    /// reordered.
+    pub fn key(self) -> &'static str {
+        match self {
+            InsightNode::HpPerLevel => "hp_per_level",
+            InsightNode::GoldDropPct => "gold_drop_pct",
+            InsightNode::FormAffinity => "form_affinity",
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             InsightNode::HpPerLevel => "+1 HP / level",

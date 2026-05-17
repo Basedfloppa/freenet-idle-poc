@@ -55,6 +55,17 @@ impl LegacyNode {
         }
     }
 
+    /// Stable i18n key for `legacy_node_name.<key>` /
+    /// `legacy_node_desc.<key>`. Lowercase snake-case, never
+    /// reordered.
+    pub fn key(self) -> &'static str {
+        match self {
+            LegacyNode::HeroAttack => "hero_attack",
+            LegacyNode::EstateYield => "estate_yield",
+            LegacyNode::MissionGold => "mission_gold",
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             LegacyNode::HeroAttack => "Hero Attack",

@@ -42,14 +42,19 @@ pub fn wilds_areas(seed: u32) -> Vec<AreaDef> {
 
     let templates: [(u8, &[u8], u64, u64, u64, u64, u64); 8] = [
         // (id, preds, min_level, gold_mult, essence_mult, enemy_hp, enemy_atk)
-        (100, &[],          15, 5, 3,  180,  35),
-        (101, &[100],       17, 6, 4,  220,  45),
-        (102, &[100],       17, 4, 6,  220,  42),
-        (103, &[101],       19, 7, 4,  280,  55),
-        (104, &[102],       19, 5, 7,  280,  52),
-        (105, &[101, 102],  20, 8, 8,  340,  62),
-        (106, &[103],       22, 9, 5,  420,  75),
-        (107, &[104, 105],  22, 6, 9,  420,  72),
+        // Wilds entrance aligns with Boss's Lair (min_level 10) so a
+        // player who finishes the linear chain can step straight in.
+        // Inner Wilds ramp up to lvl 45 — combined with the quadratic
+        // `scale_by_area_level` factor, the deep nodes stay tough for
+        // end-game players carrying full Legacy/Insight/Token spend.
+        (100, &[],          10,  8,  5,  180,  35),
+        (101, &[100],       15, 10,  6,  220,  45),
+        (102, &[100],       15,  6, 10,  220,  42),
+        (103, &[101],       20, 12,  6,  280,  55),
+        (104, &[102],       20,  8, 12,  280,  52),
+        (105, &[101, 102],  25, 14, 14,  340,  62),
+        (106, &[103],       35, 16,  8,  420,  75),
+        (107, &[104, 105],  45, 10, 16,  420,  72),
     ];
     for &(id, preds, min_level, gm, em, ehp, eatk) in &templates {
         let name = wilds_name(id as u32, &mut rng);
@@ -75,7 +80,10 @@ pub fn wilds_areas(seed: u32) -> Vec<AreaDef> {
             enemy_hp: jitter(ehp),
             enemy_atk: jitter(eatk),
             enemy_def: jitter(eatk / 2),
-            clears_required: 15 + (min_level - 15) * 3,
+            // 0 clears required for the entrance (lvl 10); inner
+            // nodes ramp linearly with min_level. `saturating_sub`
+            // keeps the formula safe when min_level <= 10.
+            clears_required: min_level.saturating_sub(10).saturating_mul(3),
             predecessors: leak_predecessors(preds),
         });
     }

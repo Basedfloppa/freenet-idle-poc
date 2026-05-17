@@ -489,5 +489,21 @@
   "token_perk_desc.gear_mastery": "Multiplie les bonus atk/déf/PV de chaque pièce équipée par 1,20. Se cumule multiplicativement avec Legacy et Insight.",
   "token_perk_desc.boss_fury": "Double les dégâts infligés au boss à chaque rencontre dans une zone de contact.",
   "token_perk_desc.alchemist_trust": "Double la cadence de drop des potions — une potion toutes les POTION_DROP_EVERY missions devient deux.",
-  "token_perk_desc.merchant_seal": "+50% à la récompense en or de chaque rencontre. Se compose avec Legacy MissionGold et Insight GoldDropPct."
+  "token_perk_desc.merchant_seal": "+50% à la récompense en or de chaque rencontre. Se compose avec Legacy MissionGold et Insight GoldDropPct.",
+  "estate_tier_name.0": "Ouvrier agricole",
+  "estate_tier_name.1": "Cueilleur",
+  "estate_tier_name.2": "Marchand",
+  "estate_tier_name.3": "Sage",
+  "legacy_node_name.hero_attack": "Attaque du héros",
+  "legacy_node_name.estate_yield": "Rendement du domaine",
+  "legacy_node_name.mission_gold": "Or de mission",
+  "legacy_node_desc.hero_attack": "Multiplie l'attaque de base + le bonus du héros de +5% par niveau. Se cumule multiplicativement après équipement / forme / compétences.",
+  "legacy_node_desc.estate_yield": "Multiplie le rendement des travailleurs du domaine de +10% par niveau. Se combine multiplicativement avec l'affinité de forme.",
+  "legacy_node_desc.mission_gold": "Multiplie l'or gagné par rencontre de +5% par niveau. S'applique aussi bien à RunMission qu'aux victoires d'auto-mission.",
+  "insight_node_name.hp_per_level": "+1 PV par niveau",
+  "insight_node_name.gold_drop_pct": "+1% d'or",
+  "insight_node_name.form_affinity": "Biais d'affinité de forme",
+  "insight_node_desc.hp_per_level": "Ajoute 1 PV par niveau du héros par niveau du nœud. Au-dessus de la courbe de base 5 PV/niveau — surtout efficace en fin de partie.",
+  "insight_node_desc.gold_drop_pct": "Ajoute +1% par niveau du nœud à chaque récompense en or. Se combine multiplicativement avec Legacy MissionGold et area gold_mult.",
+  "insight_node_desc.form_affinity": "Étire le tableau d'affinité de la forme actuelle — bonus augmentés de +10% par niveau du nœud, pénalités réduites de +5%. Encourage la spécialisation."
 }

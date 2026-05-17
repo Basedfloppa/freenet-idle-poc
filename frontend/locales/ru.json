@@ -497,5 +497,21 @@
   "token_perk_desc.gear_mastery": "Множит бонусы атаки/защиты/ХП от каждой надетой вещи на 1.20. Множится поверх Legacy и Прозрения.",
   "token_perk_desc.boss_fury": "Удваивает урон по мировому боссу за каждое столкновение в зоне с контактом с боссом.",
   "token_perk_desc.alchemist_trust": "Удваивает каденс выпадения зелий — одно зелье за POTION_DROP_EVERY миссий превращается в два.",
-  "token_perk_desc.merchant_seal": "+50% к награде золотом за каждое столкновение. Складывается с Legacy MissionGold и Прозрением GoldDropPct."
+  "token_perk_desc.merchant_seal": "+50% к награде золотом за каждое столкновение. Складывается с Legacy MissionGold и Прозрением GoldDropPct.",
+  "estate_tier_name.0": "Батрак",
+  "estate_tier_name.1": "Собиратель",
+  "estate_tier_name.2": "Торговец",
+  "estate_tier_name.3": "Мудрец",
+  "legacy_node_name.hero_attack": "Атака героя",
+  "legacy_node_name.estate_yield": "Доход поместья",
+  "legacy_node_name.mission_gold": "Золото за миссию",
+  "legacy_node_desc.hero_attack": "Множит базовую и бонусную атаку героя на +5% за уровень. Складывается мультипликативно поверх снаряжения / формы / навыков.",
+  "legacy_node_desc.estate_yield": "Множит доход работников поместья на +10% за уровень. Компонуется мультипликативно с аффинити формы.",
+  "legacy_node_desc.mission_gold": "Множит золото с каждого боя на +5% за уровень. Действует и на RunMission, и на победы авто-миссий.",
+  "insight_node_name.hp_per_level": "+1 ОЗ за уровень",
+  "insight_node_name.gold_drop_pct": "+1% к золоту",
+  "insight_node_name.form_affinity": "Смещение аффинити формы",
+  "insight_node_desc.hp_per_level": "Добавляет 1 ОЗ за уровень героя за уровень узла. Поверх базовой кривой 5 ОЗ/lvl — наиболее эффективно в позднем гейме.",
+  "insight_node_desc.gold_drop_pct": "Добавляет +1% за уровень узла к каждой награде золотом. Складывается мультипликативно с Legacy MissionGold и area gold_mult.",
+  "insight_node_desc.form_affinity": "Расширяет таблицу аффинити формы по поместью — баффы растут на +10% за уровень узла, штрафы сокращаются на +5%. Стимулирует специализацию."
 }

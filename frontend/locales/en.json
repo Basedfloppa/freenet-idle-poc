@@ -495,5 +495,21 @@
   "token_perk_desc.gear_mastery": "Multiplies the attack/defence/HP bonuses from every equipped piece by 1.20. Stacks multiplicatively with Legacy nodes and Insight.",
   "token_perk_desc.boss_fury": "Doubles the mission boss damage you contribute on every encounter at a boss-contact area.",
   "token_perk_desc.alchemist_trust": "Doubles the potion drop cadence — one potion per POTION_DROP_EVERY missions becomes two.",
-  "token_perk_desc.merchant_seal": "Adds +50% to every encounter's gold reward. Compounds with Legacy MissionGold and Insight GoldDropPct."
+  "token_perk_desc.merchant_seal": "Adds +50% to every encounter's gold reward. Compounds with Legacy MissionGold and Insight GoldDropPct.",
+  "estate_tier_name.0": "Farmhand",
+  "estate_tier_name.1": "Forager",
+  "estate_tier_name.2": "Trader",
+  "estate_tier_name.3": "Sage",
+  "legacy_node_name.hero_attack": "Hero Attack",
+  "legacy_node_name.estate_yield": "Estate Yield",
+  "legacy_node_name.mission_gold": "Mission Gold",
+  "legacy_node_desc.hero_attack": "Multiplies hero base + bonus attack by +5% per level. Stacks multiplicatively after gear / form / skill bonuses.",
+  "legacy_node_desc.estate_yield": "Multiplies Estate worker yield by +10% per level. Compounds with form affinity multiplicatively.",
+  "legacy_node_desc.mission_gold": "Multiplies gold gained per encounter by +5% per level. Applies to RunMission and auto-mission wins alike.",
+  "insight_node_name.hp_per_level": "+1 HP per level",
+  "insight_node_name.gold_drop_pct": "+1% gold drop",
+  "insight_node_name.form_affinity": "Form affinity bias",
+  "insight_node_desc.hp_per_level": "Adds 1 HP per hero level per node level. Stacks on top of the base 5 HP/lvl curve, so it's most effective in the late game.",
+  "insight_node_desc.gold_drop_pct": "Adds 1% per node level to every encounter's gold reward. Compounds multiplicatively with Legacy MissionGold and area gold_mult.",
+  "insight_node_desc.form_affinity": "Stretches the current form's Estate-tier affinity table — buffs grow by +10% per node level, penalties shrink by +5%. Encourages specialisation."
 }
