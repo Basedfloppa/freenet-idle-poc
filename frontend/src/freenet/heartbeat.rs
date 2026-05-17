@@ -20,7 +20,7 @@ use crate::{now_ms, CoreCell, PendingCell};
 
 pub fn heartbeat_once(core: CoreCell, pending: PendingCell, bump: UseStateSetter<u64>) {
     // No contract key = single-player mode, nothing to publish.
-    let (ws, name, delegate_key, contract_key) = {
+    let (ws, name, delegate_key, contract_key, area_label) = {
         let g = core.borrow();
         let Some(c) = g.as_ref() else { return };
         let Some(ws) = c.ws.clone() else { return };
@@ -35,7 +35,10 @@ pub fn heartbeat_once(core: CoreCell, pending: PendingCell, bump: UseStateSetter
         let Some(contract_key) = c.contract_key.clone() else {
             return;
         };
-        (ws, c.name.clone(), c.delegate_key.clone(), contract_key)
+        let area_def = shared::current_area_def(&c.inventory);
+        let area_label =
+            crate::app::i18n_shared::area_name(c.prefs.locale, &area_def).to_string();
+        (ws, c.name.clone(), c.delegate_key.clone(), contract_key, area_label)
     };
 
     spawn_local(async move {
@@ -46,7 +49,7 @@ pub fn heartbeat_once(core: CoreCell, pending: PendingCell, bump: UseStateSetter
             &delegate_key,
             AppRequest::PublishPresence {
                 name,
-                area: "lobby".into(),
+                area: area_label,
                 now_ms: ts,
             },
         )

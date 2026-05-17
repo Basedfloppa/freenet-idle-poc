@@ -69,6 +69,7 @@ pub fn row_view(
     received_ms: u64,
     is_me: bool,
     now: u64,
+    champion: bool,
 ) -> Html {
     let age_s = now.saturating_sub(received_ms) / 1000;
     let live = age_s < 30;
@@ -81,10 +82,23 @@ pub fn row_view(
         format!("{age_s}s")
     };
     let cls = if is_me { "you" } else { "" };
+    let name_cell = if p.name.is_empty() { short_id(pk) } else { p.name.clone() };
     html! {
         <tr class={cls}>
             <td>{ rank + 1 }</td>
-            <td>{ if p.name.is_empty() { short_id(pk) } else { p.name.clone() } }</td>
+            <td>
+                { name_cell }
+                {
+                    if champion {
+                        html! {
+                            <span
+                                class="champion-badge"
+                                title={ locale.tr_key("token_perk_name.champion_badge") }
+                            >{ "🏆" }</span>
+                        }
+                    } else { html! {} }
+                }
+            </td>
             <td class="num">{ format_si(p.gold) }</td>
             <td class="num">{ format_si(p.boss_damage) }</td>
             <td>{ &p.area }</td>

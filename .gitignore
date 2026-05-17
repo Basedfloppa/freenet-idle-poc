@@ -58,3 +58,9 @@ Thumbs.db
 
 # Backup files emitted by prod-publish.sh on every patch of keys.rs.
 *.rs.bak
+
+# Auto-skip cache. `prod-publish.sh` writes the source-tree hashes
+# of identity-delegate / presence-contract after every successful
+# publish; the next run reads them to decide which stages can be
+# auto-skipped. Pure operator-side state, never committed.
+frontend/.prod-publish-state

@@ -18,7 +18,7 @@ pub const MAX_PAYLOAD_BYTES: usize = 256;
 /// future contracts can dispatch on it instead of rejecting every
 /// older payload outright. Bump whenever a field is added or its
 /// meaning changes.
-pub const PRESENCE_PAYLOAD_VERSION: u8 = 1;
+pub const PRESENCE_PAYLOAD_VERSION: u8 = 2;
 
 /// Schema version of `ContractState`. Same forward-compat hook as
 /// `PRESENCE_PAYLOAD_VERSION`: future contract code that wants to
@@ -79,11 +79,20 @@ pub struct PresencePayload {
     /// World Boss. The contract just stores per-player numbers;
     /// the viewer-side aggregates them by summing across entries.
     pub boss_damage: u64,
-    /// Free-form area tag (e.g. "lobby", "race-42", "north-bay").
-    /// Lets clients filter who they want to see.
+    /// Free-form area tag (e.g. localized "Логово Босса",
+    /// "lobby", "race-42"). Lets clients filter who they want
+    /// to see.
     pub area: String,
     /// Wall-clock at publisher. LWW + staleness pivot.
     pub timestamp_ms: u64,
+    /// Numeric area id matching `shared::game::areas::AreaDef::id`.
+    /// Added in PRESENCE_PAYLOAD_VERSION 2 so the leaderboard can
+    /// resolve the localized area name on the receiver side rather
+    /// than trusting publisher-side translation.
+    pub area_id: u8,
+    /// Owns the Champion-badge token perk. Set by the publisher
+    /// from local inventory; the contract just relays it.
+    pub champion: bool,
 }
 
 impl PresencePayload {
@@ -94,6 +103,8 @@ impl PresencePayload {
         boss_damage: u64,
         area: String,
         timestamp_ms: u64,
+        area_id: u8,
+        champion: bool,
     ) -> Self {
         Self {
             version: PRESENCE_PAYLOAD_VERSION,
@@ -103,6 +114,8 @@ impl PresencePayload {
             boss_damage,
             area,
             timestamp_ms,
+            area_id,
+            champion,
         }
     }
 }

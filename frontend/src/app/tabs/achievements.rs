@@ -183,7 +183,17 @@ pub fn render_achievements_tab(
                         </tr>
                     </thead>
                     <tbody>
-                        { for rows.iter().enumerate().map(|(i, (pk, p, recv_ms, is_me))| row_view(locale, i, pk, p, *recv_ms, *is_me, now)) }
+                        { for rows.iter().enumerate().map(|(i, (pk, p, recv_ms, is_me))| {
+                            // Own row uses the local inventory flag; remote
+                            // rows trust the publisher-side `champion` field
+                            // added in PRESENCE_PAYLOAD_VERSION 2.
+                            let champion = if *is_me {
+                                inv.tokens.owns(shared::TokenPerk::ChampionBadge)
+                            } else {
+                                p.champion
+                            };
+                            row_view(locale, i, pk, p, *recv_ms, *is_me, now, champion)
+                        }) }
                     </tbody>
                 </table>
             </section>

@@ -49,7 +49,12 @@ pub fn publish_presence(
     let pubkey = sk.verifying_key().to_bytes();
     let name = truncate_bytes_at(name, MAX_NAME_BYTES);
     let area = truncate_bytes_at(area, MAX_AREA_BYTES);
-    let payload = PresencePayload::new(pubkey, name, inv.gold, inv.boss_damage, area, now_ms);
+    let area_id = inv.current_area;
+    let champion = inv.tokens.owns(shared::TokenPerk::ChampionBadge);
+    let payload = PresencePayload::new(
+        pubkey, name, inv.gold, inv.boss_damage, area, now_ms,
+        area_id, champion,
+    );
     let bytes = bincode::serialize(&payload).map_err(|e| format!("ser payload: {e}"))?;
     let signature: ed25519_dalek::Signature = sk.sign(&bytes);
     Ok((bytes, signature.to_bytes()))

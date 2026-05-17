@@ -1080,6 +1080,10 @@ pub fn render_core(
     // tie-break by name so the order is stable across renders.
     let mut rows: Vec<(PubKey, PresencePayload, u64, bool)> = Vec::new();
     if let Some(my) = my {
+        let own_area = shared::current_area_def(&c.inventory);
+        let own_locale = c.prefs.locale;
+        let own_area_name = i18n_shared::area_name(own_locale, &own_area).to_string();
+        let own_champion = c.inventory.tokens.owns(shared::TokenPerk::ChampionBadge);
         rows.push((
             my,
             PresencePayload::new(
@@ -1087,8 +1091,10 @@ pub fn render_core(
                 c.name.clone(),
                 c.inventory.gold,
                 c.inventory.boss_damage,
-                "lobby".into(),
+                own_area_name,
                 c.last_published_ms.unwrap_or(0),
+                c.inventory.current_area,
+                own_champion,
             ),
             now,
             true,

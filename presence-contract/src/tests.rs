@@ -16,6 +16,8 @@ fn sign(sk: &SigningKey, name: &str, gold: u64, boss_damage: u64, ts: u64) -> Si
         boss_damage,
         "lobby".into(),
         ts,
+        0,
+        false,
     );
     let bytes = bincode::serialize(&payload).unwrap();
     let sig: ed25519_dalek::Signature = sk.sign(&bytes);
@@ -64,6 +66,8 @@ fn unsigned_entry_rejected() {
         1234,
         "lobby".into(),
         100,
+        0,
+        false,
     );
     let bytes = bincode::serialize(&payload).unwrap();
     let sig: ed25519_dalek::Signature = sk_b.sign(&bytes);
@@ -233,7 +237,7 @@ fn cumulative_damage_survives_pruning() {
 
 #[test]
 fn wrong_payload_version_rejected() {
-    // Future client publishes v=2 but contract speaks v=1 only.
+    // Future client publishes v=3 but contract speaks v=2 only.
     let sk = SigningKey::from_bytes(&[60u8; 32]);
     let mut payload = PresencePayload::new(
         sk.verifying_key().to_bytes(),
@@ -242,8 +246,10 @@ fn wrong_payload_version_rejected() {
         5,
         "lobby".into(),
         1_000,
+        0,
+        false,
     );
-    payload.version = 2;
+    payload.version = 3;
     let bytes = bincode::serialize(&payload).unwrap();
     let sig: ed25519_dalek::Signature = sk.sign(&bytes);
     let entry = SignedEntry { payload: bytes, signature: sig.to_bytes() };
@@ -460,6 +466,8 @@ fn oversized_payload_rejected() {
         0,
         "lobby".into(),
         1_000,
+        0,
+        false,
     );
     let mut bytes = bincode::serialize(&payload).unwrap();
     bytes.extend(std::iter::repeat(0xAB).take(MAX_PAYLOAD_BYTES));

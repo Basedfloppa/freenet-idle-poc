@@ -33,6 +33,52 @@
 #                                        every contract / delegate
 #                                        unconditionally — needed when
 #                                        the node lost its store)
+#   ALLOW_DELEGATE_REPUBLISH
+#                    default 0           Safety gate. Republishing the
+#                                        delegate WITH A DIFFERENT
+#                                        code_hash gives it a fresh
+#                                        delegate_key, which is the
+#                                        namespace under which player
+#                                        inventories are encrypted. Old
+#                                        inventories become unreadable
+#                                        — every player effectively
+#                                        starts from zero. The script
+#                                        refuses to proceed when this
+#                                        is detected unless you set
+#                                        ALLOW_DELEGATE_REPUBLISH=1.
+#                                        See also STAGE_DELEGATE=0 to
+#                                        skip the delegate step
+#                                        entirely (reuse last keys.rs
+#                                        DELEGATE_KEY_B58 verbatim).
+#   ALLOW_PRESENCE_REPUBLISH
+#                    default 0           Same gate for presence-
+#                                        contract: a new code_hash
+#                                        produces a new contract
+#                                        instance, orphaning
+#                                        `cumulative_damage` (the
+#                                        World Boss HP ledger) and
+#                                        the live leaderboard. Less
+#                                        destructive than the delegate
+#                                        gate (player inventories are
+#                                        unaffected, leaderboard
+#                                        repopulates within heartbeat),
+#                                        but still needs an explicit
+#                                        opt-in so it can't sneak in
+#                                        with a shared-crate refactor.
+#   STAGE_DELEGATE   default: auto       Explicit 0/1 wins. When unset,
+#                                        the script hashes the source
+#                                        tree (identity-delegate/src +
+#                                        shared/src + Cargo.lock) and
+#                                        compares to the cache in
+#                                        frontend/.prod-publish-state.
+#                                        A match auto-skips the
+#                                        delegate stage — no rebuild,
+#                                        no publish, keys.rs untouched.
+#                                        A mismatch keeps the stage
+#                                        enabled and the safety gate
+#                                        below still has a vote.
+#   STAGE_PRESENCE   default: auto       Same as STAGE_DELEGATE for
+#                                        presence-contract.
 #
 # Usage examples:
 #   # via SSH tunnel forwarding orange's 7509 → local 17509
@@ -58,6 +104,92 @@ WEBSITE_KEY="${WEBSITE_KEY:-idle-poc}"
 PATCH_KEYS="${PATCH_KEYS:-1}"
 STAGE_WEBAPP="${STAGE_WEBAPP:-1}"
 FORCE_REPUBLISH="${FORCE_REPUBLISH:-0}"
+ALLOW_DELEGATE_REPUBLISH="${ALLOW_DELEGATE_REPUBLISH:-0}"
+ALLOW_PRESENCE_REPUBLISH="${ALLOW_PRESENCE_REPUBLISH:-0}"
+
+# Auto-skip cache. After every successful publish the script writes
+# the source-tree hashes for each crate into this JSON. The next run
+# computes the same hashes against the current tree; matches mean
+# "no changes since last publish" and trigger an auto-skip of that
+# stage. The operator can override either way by setting
+# STAGE_DELEGATE / STAGE_PRESENCE explicitly.
+PUBLISH_STATE="$HERE/frontend/.prod-publish-state"
+
+# SHA256 hash of every tracked source file under the supplied paths.
+# `find -print0 | sort -z | xargs -0 sha256sum | sha256sum` is
+# stable across runs (sort gives canonical ordering) and survives
+# unrelated `mtime` churn. The wrapper temporarily disables
+# pipefail so a single transient sha256sum error (e.g. a file
+# vanishing mid-scan) doesn't kill the whole script under
+# `set -euo pipefail`.
+hash_sources() {
+    set +o pipefail
+    local out
+    out="$(find "$@" -type f \
+        \( -name '*.rs' -o -name '*.toml' -o -name 'Cargo.lock' \) \
+        -print0 2>/dev/null \
+        | LC_ALL=C sort -z \
+        | xargs -0 sha256sum 2>/dev/null \
+        | sha256sum \
+        | cut -d' ' -f1)"
+    set -o pipefail
+    printf '%s' "$out"
+}
+
+# Compute current source hashes. Both delegate and presence share the
+# `shared/` crate, so a change there will count as a change for
+# either — that's the conservative behaviour (we'd rather rebuild
+# unnecessarily than skip a real change). Cargo.lock files are
+# per-crate in this workspace, so each artefact's hash includes its
+# own lockfile plus shared's.
+DELEGATE_SRC_HASH="$(hash_sources \
+    "$HERE/identity-delegate/src" \
+    "$HERE/identity-delegate/Cargo.toml" \
+    "$HERE/identity-delegate/Cargo.lock" \
+    "$HERE/shared/src" \
+    "$HERE/shared/Cargo.toml" \
+    "$HERE/shared/Cargo.lock")"
+PRESENCE_SRC_HASH="$(hash_sources \
+    "$HERE/presence-contract/src" \
+    "$HERE/presence-contract/Cargo.toml" \
+    "$HERE/presence-contract/Cargo.lock" \
+    "$HERE/shared/src" \
+    "$HERE/shared/Cargo.toml" \
+    "$HERE/shared/Cargo.lock")"
+
+# Read a `KEY=VALUE` line from the state file. Empty if absent.
+read_state() {
+    [[ -f "$PUBLISH_STATE" ]] || return 0
+    sed -nE "s/^${1}=(.*)$/\1/p" "$PUBLISH_STATE" | tail -1
+}
+
+PREV_DELEGATE_SRC_HASH="$(read_state delegate_src_sha256)"
+PREV_PRESENCE_SRC_HASH="$(read_state presence_src_sha256)"
+
+# Auto-decide STAGE_* unless the operator pinned it explicitly.
+# Empty / unset → auto; "0" / "1" → respect.
+if [[ -z "${STAGE_DELEGATE:-}" ]]; then
+    if [[ -n "$PREV_DELEGATE_SRC_HASH" && "$PREV_DELEGATE_SRC_HASH" == "$DELEGATE_SRC_HASH" ]]; then
+        STAGE_DELEGATE=0
+        echo "[prod-publish] auto-skip: identity-delegate sources unchanged since last publish"
+    else
+        STAGE_DELEGATE=1
+        if [[ -n "$PREV_DELEGATE_SRC_HASH" ]]; then
+            echo "[prod-publish] auto-stage: identity-delegate sources changed → will rebuild"
+        fi
+    fi
+fi
+if [[ -z "${STAGE_PRESENCE:-}" ]]; then
+    if [[ -n "$PREV_PRESENCE_SRC_HASH" && "$PREV_PRESENCE_SRC_HASH" == "$PRESENCE_SRC_HASH" ]]; then
+        STAGE_PRESENCE=0
+        echo "[prod-publish] auto-skip: presence-contract sources unchanged since last publish"
+    else
+        STAGE_PRESENCE=1
+        if [[ -n "$PREV_PRESENCE_SRC_HASH" ]]; then
+            echo "[prod-publish] auto-stage: presence-contract sources changed → will rebuild"
+        fi
+    fi
+fi
 
 # Resolve fdev — explicit FDEV wins, else prefer release over debug.
 # $PATH is NOT consulted: the system fdev on this machine is 0.3.151
@@ -126,6 +258,12 @@ build_and_publish_contract() {
     local crate="$1" artefact="$2" state_file="$3" label="$4"
     local out_hash_var="$5" out_id_var="$6"
     local hash_const="$7" id_const="$8"
+    # Optional 9th arg: name of an env var (e.g. ALLOW_PRESENCE_REPUBLISH)
+    # that the operator must set to "1" before this contract may be
+    # republished with a NEW code_hash. Pass empty to disable the
+    # gate. Loss surface: any per-key state stored on the existing
+    # contract instance is orphaned when a new instance is created.
+    local allow_var="${9:-}"
 
     echo "[prod-publish] building $label"
     cd "$HERE/$crate"
@@ -151,6 +289,23 @@ build_and_publish_contract() {
         echo "[prod-publish] $label code hash unchanged ($code_hash) — skipping publish, reusing id $prev_id"
         instance_id="$prev_id"
     else
+        # Safety gate — a changed code_hash means a brand-new contract
+        # instance. Whatever state lived on the old instance is
+        # orphaned; for presence-contract specifically that's the
+        # World Boss HP ledger and the live leaderboard.
+        if [[ -n "$allow_var" && -n "$prev_hash" && "$prev_hash" != "$code_hash" ]]; then
+            local allow_val="${!allow_var:-0}"
+            if [[ "$allow_val" != "1" ]]; then
+                echo "[prod-publish] REFUSING to republish $label: code_hash changed"
+                echo "[prod-publish]   previous: $prev_hash"
+                echo "[prod-publish]   built:    $code_hash"
+                echo "[prod-publish] This will mint a NEW contract instance and orphan all"
+                echo "[prod-publish] state living on the previous one. Confirm with:"
+                echo "[prod-publish]   $allow_var=1 $0 …"
+                exit 1
+            fi
+            echo "[prod-publish] $allow_var=1 — proceeding with $label republish (state will be orphaned)"
+        fi
         echo "[prod-publish] publishing $label to prod"
         pub_log="$(mktemp)"
         CARGO_TARGET_DIR="$PWD/target" "$FDEV" "${NODE_ARGS[@]}" publish \
@@ -167,10 +322,21 @@ build_and_publish_contract() {
 }
 
 ###############################################################################
-build_and_publish_contract \
-    presence-contract presence_contract "$PRESENCE_STATE" "presence-contract" \
-    CODE_HASH CONTRACT_ID \
-    CODE_HASH_B58 CONTRACT_ID_B58
+if [[ "$STAGE_PRESENCE" == "1" ]]; then
+    build_and_publish_contract \
+        presence-contract presence_contract "$PRESENCE_STATE" "presence-contract" \
+        CODE_HASH CONTRACT_ID \
+        CODE_HASH_B58 CONTRACT_ID_B58 \
+        ALLOW_PRESENCE_REPUBLISH
+else
+    echo "[prod-publish] STAGE_PRESENCE=0 — reusing presence ids from keys.rs"
+    CODE_HASH="$(read_keys_const CODE_HASH_B58)"
+    CONTRACT_ID="$(read_keys_const CONTRACT_ID_B58)"
+    if [[ -z "$CODE_HASH" || -z "$CONTRACT_ID" ]]; then
+        echo "[prod-publish] keys.rs has empty presence id/hash — can't skip stage"
+        exit 1
+    fi
+fi
 
 build_and_publish_contract \
     mailbox-contract mailbox_contract "$MAILBOX_STATE" "mailbox-contract" \
@@ -185,34 +351,74 @@ build_and_publish_contract \
 ###############################################################################
 # Delegate — no initial state; `key:` line instead of `Publishing
 # contract …`.
-echo "[prod-publish] building identity-delegate"
-cd "$HERE/identity-delegate"
-
-DELEGATE_BUILD_LOG="$(mktemp)"
-CARGO_TARGET_DIR="$PWD/target" "$FDEV" build --package-type delegate 2>&1 \
-    | tee "$DELEGATE_BUILD_LOG"
-DELEGATE_CODE_HASH="$(extract 'code hash: \K\S+' "$DELEGATE_BUILD_LOG")"
-if [[ -z "$DELEGATE_CODE_HASH" ]]; then
-    echo "[prod-publish] could not parse delegate code hash"; exit 1
-fi
-
-# Same skip-if-unchanged optimization as for contracts.
-PREV_DELEGATE_HASH="$(read_keys_const DELEGATE_CODE_HASH_B58)"
-PREV_DELEGATE_KEY="$(read_keys_const DELEGATE_KEY_B58)"
-if [[ "$FORCE_REPUBLISH" != "1" \
-      && -n "$PREV_DELEGATE_HASH" && "$PREV_DELEGATE_HASH" == "$DELEGATE_CODE_HASH" \
-      && -n "$PREV_DELEGATE_KEY" ]]; then
-    echo "[prod-publish] delegate code hash unchanged ($DELEGATE_CODE_HASH) — skipping publish, reusing key $PREV_DELEGATE_KEY"
-    DELEGATE_KEY="$PREV_DELEGATE_KEY"
+###############################################################################
+if [[ "$STAGE_DELEGATE" != "1" ]]; then
+    echo "[prod-publish] STAGE_DELEGATE=0 — reusing delegate id from keys.rs"
+    DELEGATE_KEY="$(read_keys_const DELEGATE_KEY_B58)"
+    DELEGATE_CODE_HASH="$(read_keys_const DELEGATE_CODE_HASH_B58)"
+    if [[ -z "$DELEGATE_KEY" || -z "$DELEGATE_CODE_HASH" ]]; then
+        echo "[prod-publish] keys.rs has empty delegate id/hash — can't skip stage"
+        exit 1
+    fi
 else
-    echo "[prod-publish] publishing identity-delegate to prod"
-    DELEGATE_PUB_LOG="$(mktemp)"
-    CARGO_TARGET_DIR="$PWD/target" "$FDEV" "${NODE_ARGS[@]}" publish \
-        --code build/freenet/identity_delegate \
-        delegate 2>&1 | tee "$DELEGATE_PUB_LOG"
-    DELEGATE_KEY="$(extract 'key: \K[1-9A-HJ-NP-Za-km-z]{30,}' "$DELEGATE_PUB_LOG")"
-    if [[ -z "$DELEGATE_KEY" ]]; then
-        echo "[prod-publish] could not parse delegate key"; exit 1
+    echo "[prod-publish] building identity-delegate"
+    cd "$HERE/identity-delegate"
+
+    DELEGATE_BUILD_LOG="$(mktemp)"
+    CARGO_TARGET_DIR="$PWD/target" "$FDEV" build --package-type delegate 2>&1 \
+        | tee "$DELEGATE_BUILD_LOG"
+    DELEGATE_CODE_HASH="$(extract 'code hash: \K\S+' "$DELEGATE_BUILD_LOG")"
+    if [[ -z "$DELEGATE_CODE_HASH" ]]; then
+        echo "[prod-publish] could not parse delegate code hash"; exit 1
+    fi
+
+    # Same skip-if-unchanged optimization as for contracts.
+    PREV_DELEGATE_HASH="$(read_keys_const DELEGATE_CODE_HASH_B58)"
+    PREV_DELEGATE_KEY="$(read_keys_const DELEGATE_KEY_B58)"
+    if [[ "$FORCE_REPUBLISH" != "1" \
+          && -n "$PREV_DELEGATE_HASH" && "$PREV_DELEGATE_HASH" == "$DELEGATE_CODE_HASH" \
+          && -n "$PREV_DELEGATE_KEY" ]]; then
+        echo "[prod-publish] delegate code hash unchanged ($DELEGATE_CODE_HASH) — skipping publish, reusing key $PREV_DELEGATE_KEY"
+        DELEGATE_KEY="$PREV_DELEGATE_KEY"
+    else
+        # CRITICAL SAFETY GATE — a delegate republish with a new
+        # code_hash mints a fresh delegate_key, which is the namespace
+        # under which every player's encrypted inventory blob is
+        # keyed. Old inventories become unreadable from the new
+        # delegate, so every player's save effectively dies.
+        # This is what happened on 2026-05-17 when a single line in
+        # `shared/src/freenet/presence.rs` ricocheted into the
+        # delegate's compiled WASM and we shipped a new code_hash
+        # without realising. Require an explicit opt-in.
+        if [[ -n "$PREV_DELEGATE_HASH" && "$PREV_DELEGATE_HASH" != "$DELEGATE_CODE_HASH" ]]; then
+            if [[ "$ALLOW_DELEGATE_REPUBLISH" != "1" ]]; then
+                echo "[prod-publish] REFUSING to republish delegate: code_hash changed"
+                echo "[prod-publish]   previous: $PREV_DELEGATE_HASH"
+                echo "[prod-publish]   built:    $DELEGATE_CODE_HASH"
+                echo
+                echo "[prod-publish] Publishing a new delegate WIPES every player's save."
+                echo "[prod-publish] Their inventory is encrypted under the previous"
+                echo "[prod-publish] delegate_key namespace — a fresh delegate cannot"
+                echo "[prod-publish] read it. Run with ALLOW_DELEGATE_REPUBLISH=1 only"
+                echo "[prod-publish] if a reset is explicitly intended."
+                echo
+                echo "[prod-publish] To bypass the delegate step entirely (keep last"
+                echo "[prod-publish] keys.rs DELEGATE_KEY_B58 intact and reuse the"
+                echo "[prod-publish] previously-built identity_delegate.wasm staged in"
+                echo "[prod-publish] frontend/), use STAGE_DELEGATE=0 instead."
+                exit 1
+            fi
+            echo "[prod-publish] ALLOW_DELEGATE_REPUBLISH=1 — proceeding with delegate republish (player saves will be wiped)"
+        fi
+        echo "[prod-publish] publishing identity-delegate to prod"
+        DELEGATE_PUB_LOG="$(mktemp)"
+        CARGO_TARGET_DIR="$PWD/target" "$FDEV" "${NODE_ARGS[@]}" publish \
+            --code build/freenet/identity_delegate \
+            delegate 2>&1 | tee "$DELEGATE_PUB_LOG"
+        DELEGATE_KEY="$(extract 'key: \K[1-9A-HJ-NP-Za-km-z]{30,}' "$DELEGATE_PUB_LOG")"
+        if [[ -z "$DELEGATE_KEY" ]]; then
+            echo "[prod-publish] could not parse delegate key"; exit 1
+        fi
     fi
 fi
 
@@ -224,9 +430,13 @@ fi
 # replicated through the DHT). The fdev publish above still
 # registers on the target node so the very first user (the
 # publisher) doesn't hit a register-then-call race on first load.
-cp "$HERE/identity-delegate/build/freenet/identity_delegate" \
-   "$HERE/frontend/identity_delegate.wasm"
-echo "[prod-publish] copied identity_delegate to frontend/identity_delegate.wasm"
+if [[ "$STAGE_DELEGATE" == "1" ]]; then
+    cp "$HERE/identity-delegate/build/freenet/identity_delegate" \
+       "$HERE/frontend/identity_delegate.wasm"
+    echo "[prod-publish] copied identity_delegate to frontend/identity_delegate.wasm"
+else
+    echo "[prod-publish] STAGE_DELEGATE=0 — leaving frontend/identity_delegate.wasm intact"
+fi
 
 # Stage the freshly-built presence-contract WASM into the frontend
 # the same way. The webapp Puts the bundled container on connect
@@ -235,9 +445,13 @@ echo "[prod-publish] copied identity_delegate to frontend/identity_delegate.wasm
 # with the previous run's contract code, so the Put lands under the
 # OLD contract_id while the Get/Subscribe targets the NEW id, and
 # heartbeats never reach the new contract's state store.
-cp "$HERE/presence-contract/build/freenet/presence_contract" \
-   "$HERE/frontend/presence_contract.wasm"
-echo "[prod-publish] copied presence_contract to frontend/presence_contract.wasm"
+if [[ "$STAGE_PRESENCE" == "1" ]]; then
+    cp "$HERE/presence-contract/build/freenet/presence_contract" \
+       "$HERE/frontend/presence_contract.wasm"
+    echo "[prod-publish] copied presence_contract to frontend/presence_contract.wasm"
+else
+    echo "[prod-publish] STAGE_PRESENCE=0 — leaving frontend/presence_contract.wasm intact"
+fi
 
 ###############################################################################
 # Patch frontend/src/app/keys.rs so the compile-time defaults match
@@ -393,6 +607,18 @@ else
     echo "[prod-publish] webapp contract id: $WEBAPP_ID"
     echo "[prod-publish] saved to frontend/prod-webapp-id.txt"
 fi
+
+# Persist the source-tree hashes so the next run's auto-skip detector
+# knows what "unchanged" looks like. Written ONLY on a successful
+# publish so an aborted run doesn't poison the cache.
+{
+    echo "last_publish_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "delegate_src_sha256=$DELEGATE_SRC_HASH"
+    echo "presence_src_sha256=$PRESENCE_SRC_HASH"
+    echo "delegate_code_hash=$DELEGATE_CODE_HASH"
+    echo "presence_code_hash=$CODE_HASH"
+} > "$PUBLISH_STATE"
+echo "[prod-publish] cached source hashes → $PUBLISH_STATE"
 
 echo
 echo "[prod-publish] DONE"
