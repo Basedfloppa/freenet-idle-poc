@@ -14,7 +14,7 @@ use crate::app::types::Tab;
 /// label flips.
 pub fn top_actions(locale: Locale) -> [(&'static str, &'static str, Tab); 8] {
     [
-        ("🛡", locale.tr(MessageId::TabFarm), Tab::Farm),
+        ("🏠", locale.tr(MessageId::TabHome), Tab::Home),
         ("🗺", locale.tr(MessageId::TabWorldMap), Tab::WorldMap),
         ("🛒", locale.tr(MessageId::TabShop), Tab::Shop),
         ("⚔", locale.tr(MessageId::TabGuilds), Tab::Guilds),

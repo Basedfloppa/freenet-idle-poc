@@ -110,10 +110,17 @@ impl LegacyNode {
     }
 }
 
-/// Persistent state for the Legacy loop. Lives inside `InventoryV13`
+/// Frozen V1 shape of `LegacyState`. Lives inside `InventoryV13`
 /// (additive composition over V12) so older blobs still decode.
+///
+/// **Wire-format rule:** do NOT add fields here. bincode 1 doesn't
+/// apply `#[serde(default)]` to truncated input, so extending the
+/// struct in place would corrupt every older blob. When the design
+/// needs more fields, freeze V1 as-is, define
+/// `LegacyStateV2 { base: V1, … }`, and ship V2 inside a new
+/// `InventoryV(N+1)`. Canonical example: `RoutineStateV1`/`V2`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LegacyState {
+pub struct LegacyStateV1 {
     /// Unspent stars in the player's pocket.
     pub stars: u64,
     /// Levels purchased per node (keyed by `LegacyNode::id`).
@@ -126,6 +133,10 @@ pub struct LegacyState {
     /// so the UI can show "Ascensions: N".
     pub ascend_count: u64,
 }
+
+/// Public alias. Consumer code reads/writes `LegacyState`; the V1
+/// freeze is only relevant when extending the schema (see above).
+pub type LegacyState = LegacyStateV1;
 
 /// Star award curve for the era-advance hook (C1 contract-side
 /// half). `dmg_share` is the player's contribution this era,

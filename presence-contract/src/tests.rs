@@ -237,7 +237,10 @@ fn cumulative_damage_survives_pruning() {
 
 #[test]
 fn wrong_payload_version_rejected() {
-    // Future client publishes v=3 but contract speaks v=2 only.
+    // Future client publishes a version beyond `ACCEPTED_PAYLOAD_VERSIONS`.
+    // Today the contract accepts {2, 3}; v=4 stands in for "a future
+    // schema we don't speak yet". The inner-V2 `version` field is the
+    // one `apply()` inspects (it deserializes the legacy prefix first).
     let sk = SigningKey::from_bytes(&[60u8; 32]);
     let mut payload = PresencePayload::new(
         sk.verifying_key().to_bytes(),
@@ -249,7 +252,7 @@ fn wrong_payload_version_rejected() {
         0,
         false,
     );
-    payload.version = 3;
+    payload.base.version = 4;
     let bytes = bincode::serialize(&payload).unwrap();
     let sig: ed25519_dalek::Signature = sk.sign(&bytes);
     let entry = SignedEntry { payload: bytes, signature: sig.to_bytes() };

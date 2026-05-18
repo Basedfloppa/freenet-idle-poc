@@ -11,7 +11,11 @@ use crate::app::i18n::{Locale, MessageId};
 use crate::app::i18n_shared;
 use crate::app::util::short_id;
 
-pub fn render_combat_history(locale: Locale, history: &[EncounterLog]) -> Html {
+pub fn render_combat_history(
+    locale: Locale,
+    history: &[EncounterLog],
+    hide_dmg: bool,
+) -> Html {
     if history.is_empty() {
         return html! {
             <p class="muted small">{ locale.tr(MessageId::BattleNoEncounters) }</p>
@@ -34,17 +38,28 @@ pub fn render_combat_history(locale: Locale, history: &[EncounterLog]) -> Html {
             let enemy_name = enemy_def(e.enemy_id)
                 .map(|d| i18n_shared::enemy_name(locale, d))
                 .unwrap_or_else(|| locale.tr_key("term.unknown_fallback"));
+            // §8 D5 bit 2: hide damage numbers in combat feed.
+            // The verdict + enemy name still communicate the
+            // outcome; only the magnitudes are blanked.
             let detail = if won {
-                format!(
-                    "+{}g · turn {} · dealt {} · taken {} · hp {} → {}",
-                    e.gold_gained, e.turns, e.dmg_dealt, e.dmg_taken,
-                    e.player_hp_start, e.player_hp_end,
-                )
+                if hide_dmg {
+                    format!("+{}g · turn {}", e.gold_gained, e.turns)
+                } else {
+                    format!(
+                        "+{}g · turn {} · dealt {} · taken {} · hp {} → {}",
+                        e.gold_gained, e.turns, e.dmg_dealt, e.dmg_taken,
+                        e.player_hp_start, e.player_hp_end,
+                    )
+                }
             } else {
                 let blurb = enemy_def(e.enemy_id)
                     .map(|d| i18n_shared::enemy_death_blurb(locale, d))
                     .unwrap_or("…");
-                format!("dealt {} · taken {} · {}", e.dmg_dealt, e.dmg_taken, blurb)
+                if hide_dmg {
+                    blurb.to_string()
+                } else {
+                    format!("dealt {} · taken {} · {}", e.dmg_dealt, e.dmg_taken, blurb)
+                }
             };
             html! {
                 <div class={cls}>
@@ -83,11 +98,38 @@ pub fn row_view(
     };
     let cls = if is_me { "you" } else { "" };
     let name_cell = if p.name.is_empty() { short_id(pk) } else { p.name.clone() };
+    // §E-tier: published cosmetics from PresencePayloadV3.
+    let motto = p.motto.clone();
+    let accent_id = p.accent;
+    // Map accent id to a hex hue (matches the local row_accent
+    // palette). 0 = no accent. The accent rides on the
+    // name/motto TEXT colour plus a 4px left-border ribbon so
+    // it stays legible against both light and dark theme
+    // backgrounds — a heavy background gradient otherwise
+    // washed out the text in the Dusk / High-Contrast themes.
+    let accent_hex = match accent_id {
+        1 => Some("#e57373"),
+        2 => Some("#64b5f6"),
+        3 => Some("#81c784"),
+        4 => Some("#ffd54f"),
+        5 => Some("#9575cd"),
+        6 => Some("#ff8a65"),
+        _ => None,
+    };
+    let row_style = match accent_hex {
+        Some(hue) => format!(
+            "box-shadow: inset 4px 0 0 0 {hue};"
+        ),
+        None => String::new(),
+    };
+    let name_style = accent_hex
+        .map(|hue| format!("color: {hue}; font-weight: 600;"))
+        .unwrap_or_default();
     html! {
-        <tr class={cls}>
+        <tr class={cls} style={row_style}>
             <td>{ rank + 1 }</td>
             <td>
-                { name_cell }
+                <span class="leader-name" style={name_style.clone()}>{ name_cell }</span>
                 {
                     if champion {
                         html! {
@@ -96,6 +138,15 @@ pub fn row_view(
                                 title={ locale.tr_key("token_perk_name.champion_badge") }
                             >{ "🏆" }</span>
                         }
+                    } else { html! {} }
+                }
+                {
+                    if !motto.is_empty() {
+                        // Reuse the accent hue on the motto so the whole
+                        // identity strip (name + slogan) reads as one
+                        // accented unit. Falls back to the inherited
+                        // muted colour when no accent is set.
+                        html! { <span class="leader-motto small" style={name_style.clone()}>{ format!(" — {motto}") }</span> }
                     } else { html! {} }
                 }
             </td>

@@ -1,0 +1,20 @@
+{
+  "_meta": {
+    "endonym": "High Contrast",
+    "code": "high-contrast",
+    "scheme": "dark",
+    "a11y_tag": "contrast"
+  },
+  "vars": {
+    "--bg-page": "#000000",
+    "--fg-strong": "#ffffff",
+    "--accent-primary": "#ffff00",
+    "--accent-win": "#00ff00",
+    "--accent-loss": "#ff4040",
+    "--accent-info": "#40b0ff",
+    "--accent-magic": "#ff80ff",
+    "--accent-gold": "#ffd040",
+    "--accent-earth": "#d0a060",
+    "--accent-grass": "#40ff60"
+  }
+}

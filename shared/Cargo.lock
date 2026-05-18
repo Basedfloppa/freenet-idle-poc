@@ -150,6 +150,18 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "ed25519-dalek",
+ "idle-shared-wire",
+ "serde",
+ "serde_bytes",
+ "sha2",
+]
+
+[[package]]
+name = "idle-shared-wire"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "ed25519-dalek",
  "serde",
  "serde_bytes",
  "sha2",

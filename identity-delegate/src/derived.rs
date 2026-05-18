@@ -56,10 +56,12 @@ pub fn max_hp_of(inv: &Inventory) -> u64 {
         .insight
         .node_level(shared::InsightNode::HpPerLevel)
         .saturating_mul(lvl);
-    20u64
+    let raw = 20u64
         .saturating_add(lvl.saturating_mul(5))
         .saturating_add(hp_bonus)
-        .saturating_add(insight_hp)
+        .saturating_add(insight_hp);
+    // Token IronWill perk multiplies the final HP by 1.25.
+    raw.saturating_mul(inv.tokens.max_hp_mult_bp()) / 10_000
 }
 
 pub fn attack_of(inv: &Inventory) -> u64 {

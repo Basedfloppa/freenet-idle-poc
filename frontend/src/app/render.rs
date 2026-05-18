@@ -22,7 +22,7 @@ use crate::freenet::actions::{
     equip_gear_once, export_seed_once, forge_upgrade_once, guild_op_once,
     queue_battle_action_once, reset_inventory_once, run_mission_once, sell_gear_once,
     sell_wheat_once, send_message_once, set_area_once, set_auto_run_once,
-    set_idle_action_once, unequip_slot_once, use_consumable_once, work_farm_once,
+    set_idle_action_once, unequip_slot_once, use_consumable_once,
 };
 use crate::game::derived::{
     area_of_name, attack_from, defence_from, equipped_bonuses, max_hp_from,
@@ -32,27 +32,16 @@ use crate::game::derived::{
 use super::core::{ingest_inventory, Core, ONBOARDING_STEPS};
 use super::i18n::{locale_from_code, Locale, MessageId};
 
-/// Read the live `Locale` from a borrowed `CoreCell`. Used inside
-/// closures (confirm dialogs, callbacks) that fire *after* render
-/// returns — we can't capture the locale value because it might
-/// change mid-session, and we can't reach into the rendered DOM
-/// for it either. `Locale::default()` is the fallback if the core
-/// isn't initialised yet (in practice the closures only fire after
-/// the core is alive, so the fallback is just a type-system stub).
-fn locale_for_confirm(core: &CoreCell) -> Locale {
-    core.borrow()
-        .as_ref()
-        .map(|c| c.prefs.locale)
-        .unwrap_or_default()
-}
 use super::util::DEFAULT_WS;
-use super::prefs::{apply_theme, clear_all_prefs, save_prefs, SyncCadence, THEMES};
+use super::prefs::{apply_theme, clear_all_prefs, save_prefs, SyncCadence};
 use super::types::{Tab, ToggleField};
 use super::util::{now_ms, truncate, webapp_contract_id};
 use super::widgets::{
     render_area_card, render_battle_queue, render_battle_stage,
-    render_catchup_modal, render_combat_history, render_debug_overlay, render_equipped_slot,
-    render_mailbox_panel, render_onboarding, render_stash_grouped, render_toasts, top_actions,
+    render_catchup_modal, render_catchup_progress_modal, render_combat_history,
+    render_confirm_modal, render_debug_overlay,
+    render_equipped_slot, render_mailbox_panel, render_onboarding, render_stash_grouped,
+    render_toasts, top_actions,
 };
 use super::core::{CoreCell, PendingCell};
 
@@ -186,7 +175,7 @@ pub fn render_core(
         }
     };
 
-    // Leader-only disband. Gated behind a `window.confirm()` since
+    // Leader-only disband. Stages a custom `<ConfirmModal>` since
     // it deletes the guild for every member at once (not just self).
     let mk_guild_disband_cb = {
         let core = core_cell.clone();
@@ -197,18 +186,28 @@ pub fn render_core(
             let pending = pending.clone();
             let bump = bump.clone();
             Callback::from(move |_: MouseEvent| {
-                let win = match web_sys::window() { Some(w) => w, None => return };
-                let confirmed = win
-                    .confirm_with_message(&locale_for_confirm(&core).confirm_disband_guild(&guild_name))
-                    .unwrap_or(false);
-                if !confirmed { return; }
-                guild_op_once(
-                    core.clone(),
-                    pending.clone(),
-                    bump.clone(),
-                    shared::GUILD_OP_DISBAND,
-                    guild_id_hex.clone(),
-                );
+                let msg = core.borrow().as_ref()
+                    .map(|c| c.prefs.locale.confirm_disband_guild(&guild_name))
+                    .unwrap_or_default();
+                let core_for_action = core.clone();
+                let pending_for_action = pending.clone();
+                let bump_for_action = bump.clone();
+                let guild_id_hex_owned = guild_id_hex.clone();
+                if let Some(c) = core.borrow_mut().as_mut() {
+                    c.pending_confirm = Some(crate::app::core::PendingConfirm {
+                        message: msg,
+                        on_confirm: std::rc::Rc::new(move || {
+                            guild_op_once(
+                                core_for_action.clone(),
+                                pending_for_action.clone(),
+                                bump_for_action.clone(),
+                                shared::GUILD_OP_DISBAND,
+                                guild_id_hex_owned.clone(),
+                            );
+                        }),
+                    });
+                }
+                bump.set(now_ms());
             })
         }
     };
@@ -301,9 +300,52 @@ pub fn render_core(
             let pending = pending.clone();
             let bump = bump.clone();
             Callback::from(move |_| {
-                crate::freenet::actions::gear::sell_gear_all_once(
-                    core.clone(), pending.clone(), bump.clone(), catalog_id,
-                )
+                // §8.A8 — confirm before liquidating a whole batch
+                // when `confirm_destructive` is on. Single-row
+                // sells stay one-click via `mk_sell_cb`.
+                let needs_confirm = core.borrow().as_ref()
+                    .map(|c| c.prefs.confirm_destructive)
+                    .unwrap_or(false);
+                if !needs_confirm {
+                    crate::freenet::actions::gear::sell_gear_all_once(
+                        core.clone(), pending.clone(), bump.clone(), catalog_id,
+                    );
+                    return;
+                }
+                // Count copies + look up tier for a richer message.
+                let (count, tier) = core.borrow().as_ref()
+                    .map(|c| {
+                        let n = c.inventory.unequipped.iter()
+                            .filter(|&&id| id == catalog_id).count();
+                        let t = shared::gear_template(catalog_id)
+                            .map(|tt| tt.tier).unwrap_or(0);
+                        (n, t)
+                    })
+                    .unwrap_or((0, 0));
+                let core_for_action = core.clone();
+                let pending_for_action = pending.clone();
+                let bump_for_action = bump.clone();
+                let msg = core.borrow().as_ref()
+                    .map(|c| {
+                        c.prefs.locale.tr_key("confirm.sell_all_gear")
+                            .replace("{count}", &count.to_string())
+                            .replace("{tier}", &tier.to_string())
+                    })
+                    .unwrap_or_default();
+                if let Some(c) = core.borrow_mut().as_mut() {
+                    c.pending_confirm = Some(crate::app::core::PendingConfirm {
+                        message: msg,
+                        on_confirm: std::rc::Rc::new(move || {
+                            crate::freenet::actions::gear::sell_gear_all_once(
+                                core_for_action.clone(),
+                                pending_for_action.clone(),
+                                bump_for_action.clone(),
+                                catalog_id,
+                            );
+                        }),
+                    });
+                }
+                bump.set(now_ms());
             })
         }
     };
@@ -462,12 +504,43 @@ pub fn render_core(
             let pending = pending.clone();
             let bump = bump.clone();
             Callback::from(move |_| {
-                crate::freenet::actions::shop::buy_form_once(
-                    core.clone(),
-                    pending.clone(),
-                    bump.clone(),
-                    form,
-                )
+                // §8.A8 — wrap form-change in a custom confirm
+                // modal when `confirm_destructive` is on. Skips
+                // the modal otherwise for the legacy one-click
+                // behaviour.
+                let needs_confirm = core.borrow().as_ref()
+                    .map(|c| c.prefs.confirm_destructive)
+                    .unwrap_or(false);
+                if !needs_confirm {
+                    crate::freenet::actions::shop::buy_form_once(
+                        core.clone(), pending.clone(), bump.clone(), form,
+                    );
+                    return;
+                }
+                let core_for_action = core.clone();
+                let pending_for_action = pending.clone();
+                let bump_for_action = bump.clone();
+                let msg = core.borrow().as_ref()
+                    .map(|c| {
+                        let form_name = crate::app::i18n_shared::form_name(c.prefs.locale, form);
+                        c.prefs.locale.tr_key("confirm.form_change")
+                            .replace("{form}", form_name)
+                    })
+                    .unwrap_or_default();
+                if let Some(c) = core.borrow_mut().as_mut() {
+                    c.pending_confirm = Some(crate::app::core::PendingConfirm {
+                        message: msg,
+                        on_confirm: std::rc::Rc::new(move || {
+                            crate::freenet::actions::shop::buy_form_once(
+                                core_for_action.clone(),
+                                pending_for_action.clone(),
+                                bump_for_action.clone(),
+                                form,
+                            );
+                        }),
+                    });
+                }
+                bump.set(now_ms());
             })
         }
     };
@@ -478,27 +551,28 @@ pub fn render_core(
         let bump = bump.clone();
         Callback::from(move |_| auto_equip_once(core.clone(), pending.clone(), bump.clone()))
     };
-    let on_work_farm = {
-        let core = core_cell.clone();
-        let pending = pending.clone();
-        let bump = bump.clone();
-        Callback::from(move |_| {
-            // Optimistic +1 wheat — the click feels instant; the
-            // delegate's authoritative response (which carries
-            // achievement / ending side-effects) reconciles a
-            // moment later. Same pattern as the auto-toggle.
-            if let Some(c) = core.borrow_mut().as_mut() {
-                c.inventory.wheat = c.inventory.wheat.saturating_add(1);
-            }
-            bump.set(now_ms());
-            work_farm_once(core.clone(), pending.clone(), bump.clone())
-        })
-    };
+    // `on_work_farm` removed with the Farm panel — passive Estate
+    // yield is the only way to gain wheat now. `work_farm_once`
+    // remains in the RPC module for now in case the action is
+    // resurrected for tutorials.
     let on_sell_all_wheat = {
         let core = core_cell.clone();
         let pending = pending.clone();
         let bump = bump.clone();
         Callback::from(move |_| sell_wheat_once(core.clone(), pending.clone(), bump.clone(), 0))
+    };
+    let on_convert_all_essence = {
+        let core = core_cell.clone();
+        let pending = pending.clone();
+        let bump = bump.clone();
+        Callback::from(move |_| {
+            crate::freenet::actions::convert_essence_to_gold_once(
+                core.clone(),
+                pending.clone(),
+                bump.clone(),
+                0,
+            )
+        })
     };
     let mk_buy_gear_cb = {
         let core = core_cell.clone();
@@ -583,14 +657,18 @@ pub fn render_core(
                     let Some(c) = g.as_ref() else { return };
                     let Some(tier) = shared::estate_tier(tier_id) else { return };
                     let owned = c.inventory.estate.workers_of(tier_id);
-                    let price = shared::estate_next_price(tier, owned);
+                    let price = shared::estate_next_price_with_discount(
+                        tier, owned, c.inventory.insight.frugality_mult_bp(),
+                    );
                     c.inventory.gold >= price
                 };
                 if mutated {
                     if let Some(c) = core.borrow_mut().as_mut() {
                         if let Some(tier) = shared::estate_tier(tier_id) {
                             let owned = c.inventory.estate.workers_of(tier_id);
-                            let price = shared::estate_next_price(tier, owned);
+                            let price = shared::estate_next_price_with_discount(
+                                tier, owned, c.inventory.insight.frugality_mult_bp(),
+                            );
                             c.inventory.gold = c.inventory.gold.saturating_sub(price);
                             c.inventory.estate.hire(tier_id);
                         }
@@ -623,31 +701,55 @@ pub fn render_core(
             })
         }
     };
+    // ×N bulk variant — single closure factory for both ×10 and
+    // max-buy. Used by Legacy + Insight panels.
+    let mk_buy_legacy_bulk_cb = {
+        let core = core_cell.clone();
+        let pending = pending.clone();
+        let bump = bump.clone();
+        move |node_id: u8, count: u32| {
+            let core = core.clone();
+            let pending = pending.clone();
+            let bump = bump.clone();
+            Callback::from(move |_| {
+                crate::freenet::actions::legacy::buy_legacy_node_bulk_once(
+                    core.clone(),
+                    pending.clone(),
+                    bump.clone(),
+                    node_id,
+                    count,
+                )
+            })
+        }
+    };
 
-    // Ascend handler — soft-resets the run. Confirms first to
-    // avoid an accidental click wiping a session's worth of work.
+    // Ascend handler — soft-resets the run. Stages our custom
+    // `<ConfirmModal>` (§8.A8) instead of the browser-native
+    // `window.confirm()` so the prompt matches the rest of the UI.
     let on_ascend = {
         let core = core_cell.clone();
         let pending = pending.clone();
         let bump = bump.clone();
         Callback::from(move |_: MouseEvent| {
-            // Browser-native confirm — same chrome ResetInventory
-            // uses. The message is localised from the live `Core`
-            // so the player sees it in their picked language.
-            let confirm_msg = locale_for_confirm(&core)
-                .tr(MessageId::LegacyAscendConfirm)
-                .to_string();
-            let ok = web_sys::window()
-                .and_then(|w| w.confirm_with_message(&confirm_msg).ok())
-                .unwrap_or(false);
-            if !ok {
-                return;
+            let core_for_action = core.clone();
+            let pending_for_action = pending.clone();
+            let bump_for_action = bump.clone();
+            let msg = core.borrow().as_ref()
+                .map(|c| c.prefs.locale.tr(MessageId::LegacyAscendConfirm).to_string())
+                .unwrap_or_default();
+            if let Some(c) = core.borrow_mut().as_mut() {
+                c.pending_confirm = Some(crate::app::core::PendingConfirm {
+                    message: msg,
+                    on_confirm: std::rc::Rc::new(move || {
+                        crate::freenet::actions::legacy::ascend_once(
+                            core_for_action.clone(),
+                            pending_for_action.clone(),
+                            bump_for_action.clone(),
+                        );
+                    }),
+                });
             }
-            crate::freenet::actions::legacy::ascend_once(
-                core.clone(),
-                pending.clone(),
-                bump.clone(),
-            );
+            bump.set(now_ms());
         })
     };
 
@@ -851,6 +953,27 @@ pub fn render_core(
                         ToggleField::HideStale => {
                             c.prefs.hide_stale_players = !c.prefs.hide_stale_players;
                         }
+                        ToggleField::HideGold => {
+                            c.prefs.hide_gold = !c.prefs.hide_gold;
+                        }
+                        ToggleField::HideBossDamage => {
+                            c.prefs.hide_boss_damage = !c.prefs.hide_boss_damage;
+                        }
+                        ToggleField::ReducedMotion => {
+                            c.prefs.reduced_motion = !c.prefs.reduced_motion;
+                            crate::app::prefs::apply_visual_prefs(&c.prefs);
+                        }
+                        ToggleField::ReducedFlash => {
+                            c.prefs.reduced_flash = !c.prefs.reduced_flash;
+                            crate::app::prefs::apply_visual_prefs(&c.prefs);
+                        }
+                        ToggleField::OverlayMode => {
+                            c.prefs.overlay_mode = !c.prefs.overlay_mode;
+                            crate::app::prefs::apply_visual_prefs(&c.prefs);
+                        }
+                        ToggleField::KeyboardShortcuts => {
+                            c.prefs.keyboard_shortcuts = !c.prefs.keyboard_shortcuts;
+                        }
                     }
                     save_prefs(&c.prefs);
                 }
@@ -871,15 +994,27 @@ pub fn render_core(
         let pending = pending.clone();
         let bump = bump.clone();
         Callback::from(move |_: MouseEvent| {
-            // Browser-native confirm prompt — simplest two-button
-            // gate for a destructive op without modal infrastructure.
-            let win = match web_sys::window() { Some(w) => w, None => return };
-            let confirmed = win
-                .confirm_with_message(locale_for_confirm(&core).confirm_reset_progress())
-                .unwrap_or(false);
-            if confirmed {
-                reset_inventory_once(core.clone(), pending.clone(), bump.clone());
+            // §8.A8 — stage a confirm prompt. The custom
+            // `<ConfirmModal>` runs the captured closure on OK.
+            let core_for_action = core.clone();
+            let pending_for_action = pending.clone();
+            let bump_for_action = bump.clone();
+            let msg = core.borrow().as_ref()
+                .map(|c| c.prefs.locale.confirm_reset_progress().to_string())
+                .unwrap_or_default();
+            if let Some(c) = core.borrow_mut().as_mut() {
+                c.pending_confirm = Some(crate::app::core::PendingConfirm {
+                    message: msg,
+                    on_confirm: std::rc::Rc::new(move || {
+                        reset_inventory_once(
+                            core_for_action.clone(),
+                            pending_for_action.clone(),
+                            bump_for_action.clone(),
+                        );
+                    }),
+                });
             }
+            bump.set(now_ms());
         })
     };
 
@@ -888,30 +1023,43 @@ pub fn render_core(
         let pending = pending.clone();
         let bump = bump.clone();
         Callback::from(move |_: MouseEvent| {
-            // Two-step reveal — confirm first to discourage muscle
-            // memory clicks, then dispatch the RPC.
-            let win = match web_sys::window() { Some(w) => w, None => return };
-            let confirmed = win
-                .confirm_with_message(locale_for_confirm(&core).confirm_reveal_seed())
-                .unwrap_or(false);
-            if !confirmed { return }
-            let core_for_cb = core.clone();
-            let bump_for_cb = bump.clone();
-            export_seed_once(core.clone(), pending.clone(), move |result| {
-                if let Some(c) = core_for_cb.borrow_mut().as_mut() {
-                    let loc = c.prefs.locale;
-                    match result {
-                        Ok(seed) => {
-                            c.exported_seed_hex = Some(hex::encode(seed));
-                            c.status = loc.status_seed_exported().to_string();
-                        }
-                        Err(e) => {
-                            c.status = loc.fmt_status_seed_export_failed(&e);
-                        }
-                    }
-                }
-                bump_for_cb.set(now_ms());
-            });
+            // Stage confirm; OK handler clones run the real
+            // `export_seed_once` and update Core with the seed hex.
+            let core_for_action = core.clone();
+            let pending_for_action = pending.clone();
+            let bump_for_action = bump.clone();
+            let msg = core.borrow().as_ref()
+                .map(|c| c.prefs.locale.confirm_reveal_seed().to_string())
+                .unwrap_or_default();
+            if let Some(c) = core.borrow_mut().as_mut() {
+                c.pending_confirm = Some(crate::app::core::PendingConfirm {
+                    message: msg,
+                    on_confirm: std::rc::Rc::new(move || {
+                        let core_for_cb = core_for_action.clone();
+                        let bump_for_cb = bump_for_action.clone();
+                        export_seed_once(
+                            core_for_action.clone(),
+                            pending_for_action.clone(),
+                            move |result| {
+                                if let Some(c) = core_for_cb.borrow_mut().as_mut() {
+                                    let loc = c.prefs.locale;
+                                    match result {
+                                        Ok(seed) => {
+                                            c.exported_seed_hex = Some(hex::encode(seed));
+                                            c.status = loc.status_seed_exported().to_string();
+                                        }
+                                        Err(e) => {
+                                            c.status = loc.fmt_status_seed_export_failed(&e);
+                                        }
+                                    }
+                                }
+                                bump_for_cb.set(now_ms());
+                            },
+                        );
+                    }),
+                });
+            }
+            bump.set(now_ms());
         })
     };
 
@@ -1069,6 +1217,16 @@ pub fn render_core(
 
     let my = c.pubkey;
     let now = now_ms();
+    // Dependency token for `GraphEdgeOverlay` — changes whenever
+    // layout-affecting state shifts. We don't need precise tracking;
+    // a bump every few inventory mutations is enough for the SVG to
+    // re-measure node positions.
+    let map_bump: u64 = c.inventory.area_clears.values().copied().sum::<u64>()
+        .wrapping_add(c.inventory.current_area as u64)
+        .wrapping_add(match c.map_view {
+            crate::app::types::MapView::Linear => 0,
+            crate::app::types::MapView::Wilds => 1_000_000,
+        });
     let (boss_era, boss_hp, boss_max_hp, total_dmg) = world_boss_state(c);
     let boss_pct = if boss_max_hp == 0 {
         0
@@ -1084,9 +1242,14 @@ pub fn render_core(
         let own_locale = c.prefs.locale;
         let own_area_name = i18n_shared::area_name(own_locale, &own_area).to_string();
         let own_champion = c.inventory.tokens.owns(shared::TokenPerk::ChampionBadge);
+        // §E-tier: own row should preview the cosmetics the player
+        // will publish on the next heartbeat. Without this the
+        // motto/accent show up only on OTHER players' clients but
+        // never on the player's own row — confusing "did my publish
+        // work" UX.
         rows.push((
             my,
-            PresencePayload::new(
+            PresencePayload::new_with_cosmetics(
                 my,
                 c.name.clone(),
                 c.inventory.gold,
@@ -1095,6 +1258,9 @@ pub fn render_core(
                 c.last_published_ms.unwrap_or(0),
                 c.inventory.current_area,
                 own_champion,
+                c.inventory.routine.public_motto.clone(),
+                c.inventory.routine.public_accent,
+                c.inventory.routine.public_frame,
             ),
             now,
             true,
@@ -1133,14 +1299,10 @@ pub fn render_core(
     } else {
         locale.tr(MessageId::BtnAutoOff)
     };
-    // Estate is mutually exclusive with combat (§5.6). Disable the
-    // Run Mission button while Estate is the active idle action —
-    // delegate would reject the RPC anyway, but the visual gate is
-    // clearer than a flashing error.
-    let estate_blocking_combat =
-        c.inventory.idle_action == shared::IDLE_ACTION_ESTATE;
-    let mission_disabled =
-        my.is_none() || c.mission_in_flight || estate_blocking_combat;
+    // §⚠️#2 (2026-05-18): Estate yield is parallel for every player;
+    // delegate no longer rejects Run Mission while Estate is the
+    // active idle action. The visual gate is gone.
+    let mission_disabled = my.is_none() || c.mission_in_flight;
 
     let inv = &c.inventory;
     // Reveal-bit slide-in animation is gated to the keys that just
@@ -1178,7 +1340,7 @@ pub fn render_core(
     // passively at a much higher rate and the manual click
     // would feel like a no-op. New players without a Farmhand
     // still get the original click-to-farm path.
-    let farmhand_active = inv.base.base.estate.workers_of(0) > 0;
+    let _farmhand_active = inv.base.base.estate.workers_of(0) > 0;
     // Show the Linear/Wilds map switcher once the player has
     // some buffer over Wilds-entrance min_level (15). Five-level
     // buffer so the option appears slightly before it becomes
@@ -1269,11 +1431,39 @@ pub fn render_core(
     };
     let _ = (area_of_name, status_text);
 
+    // Custom confirm modal (§8.A8) — OK fires the staged closure
+    // and clears the slot; Cancel just clears the slot.
+    let on_confirm_ok = {
+        let core = core_cell.clone();
+        let bump = bump.clone();
+        Callback::from(move |_: MouseEvent| {
+            let action = if let Some(c) = core.borrow_mut().as_mut() {
+                c.pending_confirm.take().map(|p| p.on_confirm)
+            } else { None };
+            if let Some(on_ok) = action {
+                on_ok();
+            }
+            bump.set(now_ms());
+        })
+    };
+    let on_confirm_cancel = {
+        let core = core_cell.clone();
+        let bump = bump.clone();
+        Callback::from(move |_: MouseEvent| {
+            if let Some(c) = core.borrow_mut().as_mut() {
+                c.pending_confirm = None;
+            }
+            bump.set(now_ms());
+        })
+    };
+
     html! {
         <main>
             { render_toasts(&c.toasts, now) }
             { render_onboarding(locale, c.onboarding_step, on_onboarding_next, on_onboarding_skip) }
             { render_catchup_modal(c, locale, on_catchup_dismiss) }
+            { render_catchup_progress_modal(c, locale) }
+            { render_confirm_modal(locale, &c.pending_confirm, on_confirm_ok, on_confirm_cancel) }
             <header class="page-head">
                 <div class="title-row">
                     <h1>{ "Freenet Idle PoC" }</h1>
@@ -1301,12 +1491,21 @@ pub fn render_core(
 
             <nav class="top-actions">
                 { for top_actions(locale).iter().filter(|(_, _, tab)| {
+                    // §8 B3: user-hidden tabs. Bit `i` set = hide
+                    // the i-th tab. Home/Settings/Help are
+                    // protected — hiding them would deadlock the
+                    // UI (no way to get back to settings to unhide).
+                    let idx = *tab as u8;
+                    let protected = matches!(tab, Tab::Home | Tab::Settings | Tab::Help);
+                    if !protected && (c.prefs.hidden_tabs & (1u32 << idx)) != 0 {
+                        return false;
+                    }
                     // Phased reveal (A5): tabs stay hidden until
-                    // their reveal-bit latches on. Farm / Settings /
+                    // their reveal-bit latches on. Home / Settings /
                     // Help are always shown so a fresh player has
                     // somewhere to be.
                     match tab {
-                        Tab::Farm | Tab::Settings | Tab::Help => true,
+                        Tab::Home | Tab::Settings | Tab::Help => true,
                         Tab::WorldMap => inv.revealed_has(shared::RevealKey::WorldMap),
                         Tab::Shop => inv.revealed_has(shared::RevealKey::Shop),
                         Tab::Guilds => inv.revealed_has(shared::RevealKey::Guilds),
@@ -1332,16 +1531,23 @@ pub fn render_core(
                         Tab::Shop => anim_cls(shared::RevealKey::Shop),
                         Tab::Guilds => anim_cls(shared::RevealKey::Guilds),
                         Tab::Achievements => anim_cls(shared::RevealKey::Achievements),
-                        Tab::Farm | Tab::Settings | Tab::Help | Tab::Mastery => "",
+                        Tab::Home | Tab::Settings | Tab::Help | Tab::Mastery => "",
                     };
                     let cls = classes!(
                         "icon-btn",
                         if is_active { "active" } else { "" },
                         anim,
                     );
+                    // §8 D4: data-shortcut="1".."9" — pressed
+                    // keys 1-9 switch to the corresponding visible
+                    // tab. Indexing AFTER the reveal-bit + hidden_tabs
+                    // filter so the digit lines up with what the
+                    // player actually sees.
+                    let shortcut = format!("{}", (*tab as usize) + 1);
                     html! {
                         <button
                             class={cls}
+                            data-shortcut={shortcut}
                             onclick={mk_tab_cb(*tab)}
                             aria-selected={if is_active { "true" } else { "false" }}
                         >
@@ -1356,7 +1562,7 @@ pub fn render_core(
             // tabs swaps the entire main content; no scrolling
             // between sections, no surplus context bleeding in.
             { match c.current_tab {
-                Tab::Farm => html! {
+                Tab::Home => html! {
                     <>
                         {
                             if inv.mission_count == 0 {
@@ -1394,13 +1600,33 @@ pub fn render_core(
                                         <input type="text" value={c.name.clone()} oninput={on_name} />
                                     </label>
                                 </div>
+                                {
+                                    // §8 C6: motto display under hero name. Hidden when empty.
+                                    if !c.prefs.motto.is_empty() {
+                                        html! { <p class="hero-motto muted small">{ &c.prefs.motto }</p> }
+                                    } else { html! {} }
+                                }
+                                { render_daily_checkin(c, locale, core_cell.clone(), pending.clone(), bump.clone()) }
                                 <table class="statgrid">
                                     <tbody>
                                         <tr>
                                             <th>{ locale.tr(MessageId::StatForm) }</th>
                                             <td class="num">
                                                 <span class="form-name">
-                                                    { format!("{} {}", form_sprite(inv.current_form), i18n_shared::form_name(locale, inv.current_form)) }
+                                                    {
+                                                        // §8 C5: hero_skin override. Trust only
+                                                        // non-empty strings whose chars are in
+                                                        // the picker whitelist (single emoji glyph).
+                                                        format!(
+                                                            "{} {}",
+                                                            if !c.prefs.hero_skin.is_empty() {
+                                                                c.prefs.hero_skin.clone()
+                                                            } else {
+                                                                form_sprite(inv.current_form).to_string()
+                                                            },
+                                                            i18n_shared::form_name(locale, inv.current_form),
+                                                        )
+                                                    }
                                                 </span>
                                             </td>
                                         </tr>
@@ -1438,9 +1664,44 @@ pub fn render_core(
                                         <tr><th>{ locale.tr(MessageId::StatEvasion) }</th><td class="num">{ format!("{p_evasion}%") }</td></tr>
                                     </tbody>
                                 </table>
-                                { if c.prefs.hide_pubkey { html! {} } else {
-                                    html! { <p class="muted small">{ &pubkey_text }</p> }
-                                } }
+                                {
+                                    // §UX 2026-05-17 fix: HP-regen banner.
+                                    // When auto-mission is on AND the
+                                    // player isn't currently in a battle
+                                    // AND HP is below max, surface the
+                                    // remaining regen time so the player
+                                    // knows the loop is paused for a
+                                    // known reason, not stuck. Hidden
+                                    // when HP is full (loop will pick up
+                                    // on next tick) or when manually idle.
+                                    if inv.auto_run_enabled
+                                        && inv.current_battle.is_none()
+                                        && inv.current_hp < hp_max
+                                    {
+                                        let missing = hp_max.saturating_sub(inv.current_hp);
+                                        let secs = if hp_max == 0 { 0 } else {
+                                            (missing * shared::HP_FULL_REGEN_MS / hp_max / 1000).max(1)
+                                        };
+                                        html! {
+                                            <p class="hp-regen-banner muted small">
+                                                { locale.tr_key("hp_regen.banner")
+                                                    .replace("{secs}", &secs.to_string()) }
+                                            </p>
+                                        }
+                                    } else { html! {} }
+                                }
+                                {
+                                    // §8 C4: pubkey display variant gate.
+                                    // Hidden → suppress; Short/Full → show
+                                    // (Full is the legacy long-form; Short
+                                    // reads `pubkey_text` which already
+                                    // formats as `tag…short_id` via the
+                                    // locale string).
+                                    match c.prefs.pubkey_display {
+                                        crate::app::prefs::PUBKEY_DISPLAY_HIDDEN => html! {},
+                                        _ => html! { <p class="muted small">{ &pubkey_text }</p> },
+                                    }
+                                }
                             </article>
 
                             <article class="panel scene">
@@ -1450,11 +1711,17 @@ pub fn render_core(
                                     // the static emojis only for the actual visual.
                                     // Action row (Run Mission + auto) stays put.
                                     if let Some(battle) = inv.current_battle.as_ref() {
-                                        render_battle_stage(locale, battle, inv, hp_max)
+                                        render_battle_stage(locale, battle, inv, hp_max, &c.prefs)
                                     } else {
                                         html! {
                                             <div class="stage">
-                                                <div class="hero-sprite">{ form_sprite(inv.current_form) }</div>
+                                                <div class="hero-sprite">{
+                                                    if !c.prefs.hero_skin.is_empty() {
+                                                        c.prefs.hero_skin.clone()
+                                                    } else {
+                                                        form_sprite(inv.current_form).to_string()
+                                                    }
+                                                }</div>
                                                 <div class="vs">{ "⚔" }</div>
                                                 <div class="enemy-sprite">
                                                     { shared::area_default_enemy_sprite(inv.current_area) }
@@ -1465,13 +1732,12 @@ pub fn render_core(
                                 }
                                 <div class="action-row">
                                     <button class="primary"
+                                            data-shortcut="M"
                                             onclick={on_run_mission}
                                             disabled={mission_disabled || inv.current_battle.is_some()}
                                             title={
                                                 if inv.current_battle.is_some() {
                                                     locale.tr(MessageId::TipFightInProgress)
-                                                } else if estate_blocking_combat {
-                                                    locale.tr(MessageId::TipEstateBlocksCombat)
                                                 } else { "" }
                                             }>
                                         { locale.tr(MessageId::BtnRunMission) }
@@ -1484,21 +1750,17 @@ pub fn render_core(
                                         // they should learn the loop,
                                         // then they can automate it.
                                         if inv.revealed_has(shared::RevealKey::AutoMission) {
-                                            // Auto-mission and Estate are the same kind of
-                                            // idle commitment — only one can hold the
-                                            // single-active-action slot (§5.6). Grey the
-                                            // toggle while Estate is running so the player
-                                            // sees the conflict at a glance instead of
-                                            // toggling auto-mission and silently flipping
-                                            // their accrual mode.
-                                            let auto_disabled = my.is_none() || estate_blocking_combat;
-                                            let auto_tip = if estate_blocking_combat {
-                                                locale.tr(MessageId::TipEstateBlocksCombat)
-                                            } else if inv.current_battle.is_some() {
+                                            // §⚠️#2 (2026-05-18): Estate yields run in
+                                            // parallel with combat for every player, so
+                                            // toggling auto-mission no longer fights the
+                                            // Estate's single-active-action slot.
+                                            let auto_disabled = my.is_none();
+                                            let auto_tip = if inv.current_battle.is_some() {
                                                 locale.tr(MessageId::TipAutoToggleMidFight)
                                             } else { "" };
                                             html! {
                                                 <button class={classes!(anim_cls(shared::RevealKey::AutoMission))}
+                                                        data-shortcut="A"
                                                         onclick={on_toggle_auto}
                                                         disabled={auto_disabled}
                                                         title={auto_tip}>
@@ -1516,7 +1778,7 @@ pub fn render_core(
                                     // can react without losing the auto / Run
                                     // controls.
                                     if let Some(battle) = inv.current_battle.as_ref() {
-                                        render_battle_queue(locale, battle, inv)
+                                        render_battle_queue(locale, battle, inv, &c.prefs)
                                     } else {
                                         html! {
                                             <p class="tooltip muted">
@@ -1539,7 +1801,14 @@ pub fn render_core(
                                         &format_si(c.last_published.boss_damage),
                                     ) }
                                 </p>
-                                { render_combat_history(locale, &inv.combat_history) }
+                                // §8 D5 bit 2: keep per-battle history
+                                // visible (it carries outcome + gold +
+                                // turn count) — only the per-encounter
+                                // "dealt N taken N" tail is suppressed.
+                                // The per-turn ticker DURING a battle is
+                                // gated separately inside
+                                // `render_battle_queue`.
+                                { render_combat_history(locale, &inv.combat_history, (c.prefs.numerical_assists & 0b100) != 0) }
                             </article>
 
                             // Phased reveal (A5): the Equipment panel
@@ -1555,6 +1824,7 @@ pub fn render_core(
                                             <p class="muted small">{ locale.fmt_equipped_bonus(eq_atk, eq_def, eq_hp) }</p>
                                             <div class="action-row">
                                                 <button
+                                                    data-shortcut="E"
                                                     onclick={on_auto_equip}
                                                     disabled={!auto_equip_can_improve}
                                                     title={auto_equip_tip.clone()}
@@ -1722,7 +1992,9 @@ pub fn render_core(
                                             <tbody>
                                                 { for shared::ESTATE_TIERS.iter().map(|tier| {
                                                     let owned = inv.estate.workers_of(tier.id);
-                                                    let next_price = shared::estate_next_price(tier, owned);
+                                                    let next_price = shared::estate_next_price_with_discount(
+                                                        tier, owned, inv.insight.frugality_mult_bp(),
+                                                    );
                                                     let insight_aff = inv.insight.node_level(shared::InsightNode::FormAffinity);
                                                     let aff_bp = shared::form_affinity_bp_with_insight(
                                                         inv.current_form, tier.id, insight_aff,
@@ -1783,10 +2055,14 @@ pub fn render_core(
                             <h2>{ locale.tr(MessageId::PanelResources) }</h2>
                             <table class="inventory">
                                 <tbody>
-                                    <tr><th>{ locale.tr(MessageId::ResGold) }</th><td class="num">{ format_si(inv.gold) }</td></tr>
-                                    <tr><th>{ locale.tr(MessageId::ResEssence) }</th><td class="num">{ format_si(inv.essence) }</td></tr>
+                                    <tr><th>{ locale.tr(MessageId::ResGold) }</th><td class="num">{ crate::app::prefs::render_gold(c.prefs.hide_gold, inv.gold) }</td></tr>
+                                    <tr>
+                                        <th>{ locale.tr(MessageId::ResEssence) }</th>
+                                        <td class="num">{ format_si(inv.essence) }</td>
+                                    </tr>
+                                    <tr class="res-divider"><td colspan="2" class="muted small">{ locale.tr_key("res.progressive_group") }</td></tr>
                                     <tr><th>{ locale.tr(MessageId::ResMissions) }</th><td class="num">{ format_si(inv.mission_count) }</td></tr>
-                                    <tr><th>{ locale.tr(MessageId::ResBossDamage) }</th><td class="num">{ format_si(inv.boss_damage) }</td></tr>
+                                    <tr><th>{ locale.tr(MessageId::ResBossDamage) }</th><td class="num">{ crate::app::prefs::render_boss_damage(c.prefs.hide_boss_damage, inv.boss_damage) }</td></tr>
                                 </tbody>
                             </table>
                         </section>
@@ -1817,7 +2093,23 @@ pub fn render_core(
                                             </button>
                                             <button
                                                 class={if c.map_view == crate::app::types::MapView::Wilds { "primary" } else { "" }}
-                                                onclick={mk_map_view_cb(crate::app::types::MapView::Wilds)}>
+                                                onclick={mk_map_view_cb(crate::app::types::MapView::Wilds)}
+                                                title={
+                                                    // §P3 wilds preview tooltip. Count
+                                                    // landmark-bearing Wilds areas the
+                                                    // player hasn't claimed yet.
+                                                    let mut unclaimed = 0u32;
+                                                    for area_id in shared::WILDS_AREA_BASE..=255u8 {
+                                                        if shared::wilds_landmark(area_id).is_some()
+                                                            && !inv.landmark_claims.contains_key(&area_id)
+                                                        {
+                                                            unclaimed += 1;
+                                                        }
+                                                    }
+                                                    locale.tr_key("map.wilds_tooltip")
+                                                        .replace("{n}", &unclaimed.to_string())
+                                                }
+                                            >
                                                 { locale.tr(MessageId::MapViewWilds) }
                                             </button>
                                         </div>
@@ -1827,25 +2119,27 @@ pub fn render_core(
                             {
                                 if c.map_view == crate::app::types::MapView::Linear {
                                     html! {
-                                        <div class="area-graph">
+                                        <div id="area-graph-linear" class="area-graph">
+                                            <crate::app::widgets::GraphEdgeOverlay
+                                                host_id={"area-graph-linear"}
+                                                bump={map_bump}
+                                            />
                                             { for area_columns.iter().map(|(depth, row_areas)| html! {
                                                 <div class={classes!("graph-row", format!("depth-{}", depth))}>
                                                     { for row_areas.iter().map(|a| {
                                                         let has_parent = !a.predecessors.is_empty();
-                                                        let upstream_label = if has_parent {
-                                                            let names: Vec<String> = a.predecessors
-                                                                .iter()
-                                                                .filter_map(|pid| shared::AREAS.iter().find(|x| x.id == *pid))
-                                                                .map(|p| i18n_shared::area_name(locale, p).to_string())
-                                                                .collect();
-                                                            Some(format!("↑ {}", names.join(" / ")))
-                                                        } else { None };
+                                                        let parent_ids_csv = a.predecessors.iter()
+                                                            .map(|p| p.to_string())
+                                                            .collect::<Vec<_>>()
+                                                            .join(",");
                                                         let node_cls = if has_parent { "graph-node has-parent" } else { "graph-node starter" };
+                                                        let area_id_str = a.id.to_string();
                                                         html! {
-                                                            <div class={node_cls}>
-                                                                { if let Some(label) = upstream_label.as_ref() {
-                                                                    html! { <p class="graph-edge-hint">{ label }</p> }
-                                                                } else { html! {} } }
+                                                            <div
+                                                                class={node_cls}
+                                                                data-area-id={area_id_str}
+                                                                data-parent-ids={parent_ids_csv}
+                                                            >
                                                                 { render_area_card(locale, a, inv.current_area, lvl, inv, &mk_set_area_cb) }
                                                             </div>
                                                         }
@@ -1861,11 +2155,27 @@ pub fn render_core(
                         </section>
                         // Per-zone activities panel (A1).
                         { render_activities_panel(c, locale, core_cell.clone(), pending.clone(), bump.clone()) }
-                        <section class="panel plot">
-                            <h2>{ locale.tr(MessageId::PanelPlotSoFar) }</h2>
-                            <p class="chapter-no muted">{ locale.fmt_chapter(chap_no as u64) }</p>
-                            <p>{ chap_body_map }</p>
-                        </section>
+                        // §8 A5 spoiler-safe — hide plot copy when
+                        // the toggle is on so streamers can show the
+                        // session without revealing the story beat.
+                        {
+                            if c.prefs.spoiler_safe { html! {} } else {
+                                render_collapsible_panel(
+                                    "panel plot",
+                                    crate::app::prefs::PANEL_BIT_PLOT,
+                                    &locale.tr(MessageId::PanelPlotSoFar).to_string(),
+                                    html! {
+                                        <>
+                                            <p class="chapter-no muted">{ locale.fmt_chapter(chap_no as u64) }</p>
+                                            <p>{ chap_body_map }</p>
+                                        </>
+                                    },
+                                    c.prefs.collapsed_panels,
+                                    core_cell.clone(),
+                                    bump.clone(),
+                                )
+                            }
+                        }
                     </>
                 },
                 Tab::Shop => html! {
@@ -1874,7 +2184,7 @@ pub fn render_core(
                             <h2>{ locale.tr(MessageId::PanelShop) }</h2>
                             <p class="muted small">
                                 { locale.fmt_shop_balance(
-                                    &format_si(inv.gold),
+                                    &crate::app::prefs::render_gold(c.prefs.hide_gold, inv.gold),
                                     &inv.potions.to_string(),
                                     &inv.fireballs.to_string(),
                                 ) }
@@ -1895,29 +2205,31 @@ pub fn render_core(
                                         <button
                                             onclick={mk_bulk_buy_item_cb(CONSUMABLE_POTION, 10)}
                                             disabled={inv.gold < POTION_PRICE.saturating_mul(10)}
-                                            title="buy 10 at once"
+                                            title={locale.tr_key("shop.buy_x10_tooltip")}
                                         >
-                                            { format!("×10 ({}g)", POTION_PRICE * 10) }
+                                            { locale.tr_key("shop.buy_x10")
+                                                .replace("{gold}", &(POTION_PRICE * 10).to_string()) }
                                         </button>
                                         <button
                                             onclick={mk_bulk_buy_item_cb(CONSUMABLE_POTION, 0)}
                                             disabled={inv.gold < POTION_PRICE}
-                                            title="buy as many as gold allows (capped at 1000)"
+                                            title={locale.tr_key("shop.buy_max_tooltip")}
                                         >
-                                            { "max" }
+                                            { locale.tr_key("shop.buy_max") }
                                         </button>
                                         {
-                                            // Sell-stack button — half the buy price per
-                                            // potion, label embeds the total gain so the
-                                            // player sees what the click is worth at a glance.
                                             if inv.potions > 0 {
                                                 let unit = shared::consumable_sell_price(
                                                     CONSUMABLE_POTION).unwrap_or(0);
                                                 let total = unit.saturating_mul(inv.potions as u64);
                                                 html! {
                                                     <button onclick={on_sell_potions.clone()}
-                                                            title={format!("sell all {} potions for {total} gold", inv.potions)}>
-                                                        { format!("sell ×{} ({total}g)", inv.potions) }
+                                                            title={locale.tr_key("shop.sell_potions_tooltip")
+                                                                .replace("{count}", &inv.potions.to_string())
+                                                                .replace("{gold}", &total.to_string())}>
+                                                        { locale.tr_key("shop.sell_consumable")
+                                                            .replace("{count}", &inv.potions.to_string())
+                                                            .replace("{gold}", &total.to_string()) }
                                                     </button>
                                                 }
                                             } else { html! {} }
@@ -1927,7 +2239,8 @@ pub fn render_core(
                                 <div class="shop-item">
                                     <span class="name">{ locale.tr(MessageId::ItemFireball) }</span>
                                     <span class="desc muted">
-                                        { format!("{FIREBALL_BOSS_DAMAGE} instant boss damage") }
+                                        { locale.tr_key("shop.fireball_desc")
+                                            .replace("{dmg}", &FIREBALL_BOSS_DAMAGE.to_string()) }
                                     </span>
                                     <div class="shop-item-actions">
                                         <button
@@ -1939,16 +2252,17 @@ pub fn render_core(
                                         <button
                                             onclick={mk_bulk_buy_item_cb(CONSUMABLE_FIREBALL, 10)}
                                             disabled={inv.gold < FIREBALL_PRICE.saturating_mul(10)}
-                                            title="buy 10 at once"
+                                            title={locale.tr_key("shop.buy_x10_tooltip")}
                                         >
-                                            { format!("×10 ({}g)", FIREBALL_PRICE * 10) }
+                                            { locale.tr_key("shop.buy_x10")
+                                                .replace("{gold}", &(FIREBALL_PRICE * 10).to_string()) }
                                         </button>
                                         <button
                                             onclick={mk_bulk_buy_item_cb(CONSUMABLE_FIREBALL, 0)}
                                             disabled={inv.gold < FIREBALL_PRICE}
-                                            title="buy as many as gold allows (capped at 1000)"
+                                            title={locale.tr_key("shop.buy_max_tooltip")}
                                         >
-                                            { "max" }
+                                            { locale.tr_key("shop.buy_max") }
                                         </button>
                                         {
                                             if inv.fireballs > 0 {
@@ -1957,8 +2271,12 @@ pub fn render_core(
                                                 let total = unit.saturating_mul(inv.fireballs as u64);
                                                 html! {
                                                     <button onclick={on_sell_fireballs.clone()}
-                                                            title={format!("sell all {} fireballs for {total} gold", inv.fireballs)}>
-                                                        { format!("sell ×{} ({total}g)", inv.fireballs) }
+                                                            title={locale.tr_key("shop.sell_fireballs_tooltip")
+                                                                .replace("{count}", &inv.fireballs.to_string())
+                                                                .replace("{gold}", &total.to_string())}>
+                                                        { locale.tr_key("shop.sell_consumable")
+                                                            .replace("{count}", &inv.fireballs.to_string())
+                                                            .replace("{gold}", &total.to_string()) }
                                                     </button>
                                                 }
                                             } else { html! {} }
@@ -2029,13 +2347,25 @@ pub fn render_core(
                             </div>
                         </section>
 
-                        <section class="panel stash">
-                            <h2>{ locale.fmt_stash_header(inv.unequipped.len()) }</h2>
-                            <p class="muted small">
-                                { locale.tr(MessageId::ShopStashDesc) }
-                            </p>
-                            { render_stash_grouped(locale, inv, &mk_equip_cb, &mk_sell_cb, &mk_sell_all_cb, &mk_forge_cb) }
-                        </section>
+                        { render_collapsible_panel(
+                            "panel stash",
+                            crate::app::prefs::PANEL_BIT_STASH,
+                            &locale.fmt_stash_header(inv.unequipped.len()),
+                            html! {
+                                <>
+                                    <p class="muted small">{ locale.tr(MessageId::ShopStashDesc) }</p>
+                                    { render_stash_toolbar(c, locale, core_cell.clone(), bump.clone()) }
+                                    { render_stash_grouped(
+                                        locale, inv,
+                                        c.prefs.stash_filter, c.prefs.stash_sort,
+                                        &mk_equip_cb, &mk_sell_cb, &mk_sell_all_cb, &mk_forge_cb,
+                                    ) }
+                                </>
+                            },
+                            c.prefs.collapsed_panels,
+                            core_cell.clone(),
+                            bump.clone(),
+                        ) }
 
                         <section class="panel buy-gear">
                             <h2>{ locale.tr(MessageId::PanelBuyGear) }</h2>
@@ -2107,8 +2437,16 @@ pub fn render_core(
                                     } else {
                                         locale.fmt_buy_essence(price)
                                     };
+                                    // §P3 skill-up animation: tag the
+                                    // row with `skill-unlock-anim` if
+                                    // the skill just landed (set in
+                                    // core.animate_skills).
+                                    let mut row_cls = if owned { "skill-shop-row owned".to_string() } else { "skill-shop-row".to_string() };
+                                    if c.animate_skills.contains(sid) {
+                                        row_cls.push_str(" skill-unlock-anim");
+                                    }
                                     html! {
-                                        <li class={if owned { "skill-shop-row owned" } else { "skill-shop-row" }}>
+                                        <li class={row_cls}>
                                             <span class="skill-name">{ i18n_shared::skill_name(locale, *sid) }</span>
                                             <span class="skill-blurb muted small">{ i18n_shared::skill_blurb(locale, *sid) }</span>
                                             <button onclick={mk_buy_skill_cb(*sid)} disabled={disabled}>{ label }</button>
@@ -2118,61 +2456,19 @@ pub fn render_core(
                             </ul>
                         </section>
 
-                        // Wheat panel (post-rework): kept as the
-                        // wheat → gold exchange + balance readout.
-                        // The manual "+1 wheat" click is hidden
-                        // once any Estate Farmhand exists because
-                        // workers produce wheat passively at a
-                        // higher rate — the click would be a
-                        // misleading no-op compared to the loop
-                        // already running. We keep the button for
-                        // brand-new players who haven't bought a
-                        // worker yet so they have *something* to
-                        // do for wheat before the Estate reveal.
-                        <section class="panel farm">
-                            <h2>{ locale.tr(MessageId::PanelFarm) }</h2>
-                            <p class="muted small">
-                                {
-                                    if farmhand_active {
-                                        locale.tr(MessageId::ShopFarmDescPassive)
-                                    } else {
-                                        locale.tr(MessageId::ShopFarmDesc)
-                                    }
-                                }
-                            </p>
-                            <p>
-                                { locale.fmt_wheat_balance(
-                                    &format_si(inv.wheat),
-                                    &format_si(inv.wheat / WHEAT_PER_GOLD),
-                                ) }
-                            </p>
-                            <div class="action-row">
-                                {
-                                    if farmhand_active {
-                                        html! {}
-                                    } else {
-                                        html! {
-                                            <button onclick={on_work_farm}>
-                                                { locale.tr(MessageId::BtnWorkFarm) }
-                                            </button>
-                                        }
-                                    }
-                                }
-                                <button
-                                    onclick={on_sell_all_wheat}
-                                    disabled={inv.wheat < WHEAT_PER_GOLD}
-                                    title={locale.fmt_sell_wheat_tooltip(WHEAT_PER_GOLD as u64)}
-                                >
-                                    { locale.tr(MessageId::BtnSellAllWheat) }
-                                </button>
-                            </div>
-                        </section>
+                        // §C: Merchant exchange — promoted out of the
+                        // Resources row to its own panel.
+                        { render_exchange_panel(c, locale, on_convert_all_essence.clone(), on_sell_all_wheat.clone()) }
+
                         <section class="panel resources">
                             <h2>{ locale.tr(MessageId::PanelResources) }</h2>
                             <table class="inventory">
                                 <tbody>
-                                    <tr><th>{ locale.tr(MessageId::ResGold) }</th><td class="num">{ format_si(inv.gold) }</td></tr>
-                                    <tr><th>{ locale.tr(MessageId::ResEssence) }</th><td class="num">{ format_si(inv.essence) }</td></tr>
+                                    <tr><th>{ locale.tr(MessageId::ResGold) }</th><td class="num">{ crate::app::prefs::render_gold(c.prefs.hide_gold, inv.gold) }</td></tr>
+                                    <tr>
+                                        <th>{ locale.tr(MessageId::ResEssence) }</th>
+                                        <td class="num">{ format_si(inv.essence) }</td>
+                                    </tr>
                                     {
                                         // Hide stash-style inventory rows when empty so the
                                         // table doesn't carry "0 fireballs" forever after a
@@ -2193,6 +2489,21 @@ pub fn render_core(
                                                 <tr>
                                                     <th>{ locale.tr(MessageId::ResFireballs) }</th>
                                                     <td class="num">{ inv.fireballs }</td>
+                                                </tr>
+                                            }
+                                        } else { html! {} }
+                                    }
+                                    {
+                                        // Wheat row appears only once the
+                                        // player has accumulated some — Estate
+                                        // Farmhand path produces it passively;
+                                        // for fresh players the Resources panel
+                                        // doesn't carry a zero stub.
+                                        if inv.wheat > 0 {
+                                            html! {
+                                                <tr>
+                                                    <th>{ locale.tr_key("res.wheat") }</th>
+                                                    <td class="num">{ format_si(inv.wheat) }</td>
                                                 </tr>
                                             }
                                         } else { html! {} }
@@ -2340,7 +2651,7 @@ pub fn render_core(
                                 { locale.tr(MessageId::MasteryIntro) }
                             </p>
                         </section>
-                        { render_legacy_panel(c, &mk_buy_legacy_cb, on_ascend.clone()) }
+                        { render_legacy_panel(c, &mk_buy_legacy_cb, &mk_buy_legacy_bulk_cb, on_ascend.clone()) }
                         { render_routine_panel(c, locale, core_cell.clone(), pending.clone(), bump.clone()) }
                         { render_insight_panel(c, locale, core_cell.clone(), pending.clone(), bump.clone()) }
                         { render_boss_attack_panel(c, locale, core_cell.clone(), pending.clone(), bump.clone()) }
@@ -2383,16 +2694,16 @@ pub fn render_core(
                                 { locale.tr(MessageId::SettingsThemeDesc) }
                             </p>
                             <div class="theme-picker">
-                                { for THEMES.iter().map(|(id, label)| {
-                                    let is_active = c.current_theme == *id;
+                                { for crate::app::prefs::themes_list().into_iter().map(|(id, label)| {
+                                    let is_active = c.current_theme == id;
                                     let cls = if is_active { "theme-btn active" } else { "theme-btn" };
                                     html! {
                                         <button
                                             class={cls}
-                                            onclick={mk_theme_cb(*id)}
+                                            onclick={mk_theme_cb(id)}
                                             disabled={is_active}
                                         >
-                                            { *label }
+                                            { label }
                                         </button>
                                     }
                                 }) }
@@ -2431,6 +2742,118 @@ pub fn render_core(
                                 }) }
                             </div>
 
+                            // §8 customization (A1/A2/A5/A8).
+                            <h3>{ locale.tr_key("settings.number_format") }</h3>
+                            <p class="muted small">{ locale.tr_key("settings.number_format_desc") }</p>
+                            <div class="theme-picker">
+                                { for ["compact", "full", "raw"].iter().map(|fmt| {
+                                    let is_active = c.prefs.number_format == *fmt;
+                                    let cls = if is_active { "theme-btn active" } else { "theme-btn" };
+                                    let label = locale.tr_key(&format!("settings.number_format.{fmt}"));
+                                    let fmt_owned = fmt.to_string();
+                                    let cb = {
+                                        let core = core_cell.clone();
+                                        let pending = pending.clone();
+                                        let bump = bump.clone();
+                                        let fmt_clone = fmt_owned.clone();
+                                        Callback::from(move |_: MouseEvent| {
+                                            if let Some(c) = core.borrow_mut().as_mut() {
+                                                c.prefs.number_format = fmt_clone.clone();
+                                                save_prefs(&c.prefs);
+                                            }
+                                            crate::freenet::actions::settings::save_settings_once(
+                                                core.clone(), pending.clone(), bump.clone(),
+                                                None, None, None, None, None, None, None,
+                                            );
+                                            bump.set(now_ms());
+                                        })
+                                    };
+                                    html! {
+                                        <button class={cls} onclick={cb} disabled={is_active}>{ label }</button>
+                                    }
+                                }) }
+                            </div>
+
+                            <h3>{ locale.tr_key("settings.font_scale") }</h3>
+                            <p class="muted small">{ locale.tr_key("settings.font_scale_desc") }</p>
+                            <div class="theme-picker">
+                                { for [80u8, 100, 120, 140].iter().map(|pct| {
+                                    let is_active = c.prefs.font_scale == *pct;
+                                    let cls = if is_active { "theme-btn active" } else { "theme-btn" };
+                                    let pct_v = *pct;
+                                    let cb = {
+                                        let core = core_cell.clone();
+                                        let pending = pending.clone();
+                                        let bump = bump.clone();
+                                        Callback::from(move |_: MouseEvent| {
+                                            if let Some(c) = core.borrow_mut().as_mut() {
+                                                c.prefs.font_scale = pct_v;
+                                                crate::app::prefs::apply_font_scale(pct_v);
+                                                save_prefs(&c.prefs);
+                                            }
+                                            crate::freenet::actions::settings::save_settings_once(
+                                                core.clone(), pending.clone(), bump.clone(),
+                                                None, None, None, None, None, None, None,
+                                            );
+                                            bump.set(now_ms());
+                                        })
+                                    };
+                                    html! {
+                                        <button class={cls} onclick={cb} disabled={is_active}>{ format!("{pct_v}%") }</button>
+                                    }
+                                }) }
+                            </div>
+
+                            <h3>{ locale.tr_key("settings.spoiler_safe") }</h3>
+                            <label class="setting-toggle">
+                                <input
+                                    type="checkbox"
+                                    checked={c.prefs.spoiler_safe}
+                                    onclick={{
+                                        let core = core_cell.clone();
+                                        let pending = pending.clone();
+                                        let bump = bump.clone();
+                                        Callback::from(move |_: MouseEvent| {
+                                            if let Some(c) = core.borrow_mut().as_mut() {
+                                                c.prefs.spoiler_safe = !c.prefs.spoiler_safe;
+                                                save_prefs(&c.prefs);
+                                            }
+                                            crate::freenet::actions::settings::save_settings_once(
+                                                core.clone(), pending.clone(), bump.clone(),
+                                                None, None, None, None, None, None, None,
+                                            );
+                                            bump.set(now_ms());
+                                        })
+                                    }}
+                                />
+                                { locale.tr_key("settings.spoiler_safe_desc") }
+                            </label>
+
+                            <h3>{ locale.tr_key("settings.confirm_destructive") }</h3>
+                            <label class="setting-toggle">
+                                <input
+                                    type="checkbox"
+                                    checked={c.prefs.confirm_destructive}
+                                    onclick={{
+                                        let core = core_cell.clone();
+                                        let pending = pending.clone();
+                                        let bump = bump.clone();
+                                        Callback::from(move |_: MouseEvent| {
+                                            if let Some(c) = core.borrow_mut().as_mut() {
+                                                c.prefs.confirm_destructive = !c.prefs.confirm_destructive;
+                                                save_prefs(&c.prefs);
+                                            }
+                                            crate::freenet::actions::settings::save_settings_once(
+                                                core.clone(), pending.clone(), bump.clone(),
+                                                None, None, None, None, None, None, None,
+                                            );
+                                            bump.set(now_ms());
+                                        })
+                                    }}
+                                />
+                                { locale.tr_key("settings.confirm_destructive_desc") }
+                            </label>
+
                             <h3>{ locale.tr(MessageId::SettingsPublishBehavior) }</h3>
                             <label class="setting-toggle">
                                 <input
@@ -2444,15 +2867,19 @@ pub fn render_core(
                             <h3>{ locale.tr(MessageId::SettingsIdentityBackup) }</h3>
                             <p class="muted small">
                                 {
-                                    if c.prefs.hide_pubkey {
-                                        locale.tr(MessageId::TermPubkeyHidden).to_string()
-                                    } else {
-                                        pubkey_text.clone()
+                                    // §8 C4: 3-variant pubkey display.
+                                    // Hidden → masked sentinel; Short →
+                                    // short_id label only; Full → legacy
+                                    // long-form below.
+                                    match c.prefs.pubkey_display {
+                                        crate::app::prefs::PUBKEY_DISPLAY_HIDDEN =>
+                                            locale.tr(MessageId::TermPubkeyHidden).to_string(),
+                                        _ => pubkey_text.clone(),
                                     }
                                 }
                             </p>
                             {
-                                if !c.prefs.hide_pubkey {
+                                if c.prefs.pubkey_display == crate::app::prefs::PUBKEY_DISPLAY_FULL {
                                     if let Some(pk) = my {
                                         let hex = hex::encode(pk);
                                         html! { <p><code class="pubkey-full">{ hex }</code></p> }
@@ -2490,20 +2917,489 @@ pub fn render_core(
                                 } else { html! {} }
                             }
 
+                            <details class="settings-customization">
+                                <summary>{ locale.tr_key("settings.customization") }</summary>
+                                <p class="muted small">
+                                    { locale.tr_key("settings.customization_desc") }
+                                </p>
+
+                                <label class="setting-toggle">
+                                    <input type="checkbox"
+                                        checked={c.prefs.hide_gold}
+                                        onclick={mk_toggle_cb(ToggleField::HideGold)} />
+                                    { locale.tr_key("settings.hide_gold") }
+                                </label>
+                                <label class="setting-toggle">
+                                    <input type="checkbox"
+                                        checked={c.prefs.hide_boss_damage}
+                                        onclick={mk_toggle_cb(ToggleField::HideBossDamage)} />
+                                    { locale.tr_key("settings.hide_boss_damage") }
+                                </label>
+                                <label class="setting-toggle">
+                                    <input type="checkbox"
+                                        checked={c.prefs.reduced_motion}
+                                        onclick={mk_toggle_cb(ToggleField::ReducedMotion)} />
+                                    { locale.tr_key("settings.reduced_motion") }
+                                </label>
+                                <label class="setting-toggle">
+                                    <input type="checkbox"
+                                        checked={c.prefs.reduced_flash}
+                                        onclick={mk_toggle_cb(ToggleField::ReducedFlash)} />
+                                    { locale.tr_key("settings.reduced_flash") }
+                                </label>
+                                <label class="setting-toggle">
+                                    <input type="checkbox"
+                                        checked={c.prefs.overlay_mode}
+                                        onclick={mk_toggle_cb(ToggleField::OverlayMode)} />
+                                    { locale.tr_key("settings.overlay_mode") }
+                                </label>
+                                <label class="setting-toggle">
+                                    <input type="checkbox"
+                                        checked={c.prefs.keyboard_shortcuts}
+                                        onclick={mk_toggle_cb(ToggleField::KeyboardShortcuts)} />
+                                    { locale.tr_key("settings.keyboard_shortcuts") }
+                                </label>
+                                <p class="muted small">{ locale.tr_key("settings.keyboard_shortcuts_help") }</p>
+
+                                <h3 class="advanced-subhead">{ locale.tr_key("settings.theme_schedule") }</h3>
+                                <p class="muted small">{ locale.tr_key("settings.theme_schedule_desc") }</p>
+                                <label class="setting-text">
+                                    <span>{ locale.tr_key("settings.theme_schedule.day") }</span>
+                                    <select onchange={
+                                        let core = core_cell.clone();
+                                        let bump = bump.clone();
+                                        Callback::from(move |e: Event| {
+                                            let val = e.target_dyn_into::<web_sys::HtmlSelectElement>()
+                                                .map(|s| s.value()).unwrap_or_default();
+                                            if let Some(c) = core.borrow_mut().as_mut() {
+                                                c.prefs.theme_schedule_day = val;
+                                                save_prefs(&c.prefs);
+                                            }
+                                            bump.set(now_ms());
+                                        })
+                                    }>
+                                        <option value="" selected={c.prefs.theme_schedule_day.is_empty()}>
+                                            { locale.tr_key("settings.theme_schedule.unset") }
+                                        </option>
+                                        { for crate::app::theme_loader::available_codes().iter().map(|code| {
+                                            html! {
+                                                <option value={code.to_string()}
+                                                        selected={c.prefs.theme_schedule_day == *code}>
+                                                    { code.to_string() }
+                                                </option>
+                                            }
+                                        }) }
+                                    </select>
+                                </label>
+                                <label class="setting-text">
+                                    <span>{ locale.tr_key("settings.theme_schedule.night") }</span>
+                                    <select onchange={
+                                        let core = core_cell.clone();
+                                        let bump = bump.clone();
+                                        Callback::from(move |e: Event| {
+                                            let val = e.target_dyn_into::<web_sys::HtmlSelectElement>()
+                                                .map(|s| s.value()).unwrap_or_default();
+                                            if let Some(c) = core.borrow_mut().as_mut() {
+                                                c.prefs.theme_schedule_night = val;
+                                                save_prefs(&c.prefs);
+                                            }
+                                            bump.set(now_ms());
+                                        })
+                                    }>
+                                        <option value="" selected={c.prefs.theme_schedule_night.is_empty()}>
+                                            { locale.tr_key("settings.theme_schedule.unset") }
+                                        </option>
+                                        { for crate::app::theme_loader::available_codes().iter().map(|code| {
+                                            html! {
+                                                <option value={code.to_string()}
+                                                        selected={c.prefs.theme_schedule_night == *code}>
+                                                    { code.to_string() }
+                                                </option>
+                                            }
+                                        }) }
+                                    </select>
+                                </label>
+                                <label class="setting-text">
+                                    <span>{ locale.tr_key("settings.theme_schedule.night_hour") }</span>
+                                    <input type="number" min="0" max="23"
+                                        value={
+                                            if c.prefs.theme_night_hour == crate::app::prefs::THEME_NIGHT_HOUR_DISABLED {
+                                                String::new()
+                                            } else {
+                                                c.prefs.theme_night_hour.to_string()
+                                            }
+                                        }
+                                        oninput={
+                                            let core = core_cell.clone();
+                                            let bump = bump.clone();
+                                            Callback::from(move |e: InputEvent| {
+                                                let val = e.target_dyn_into::<web_sys::HtmlInputElement>()
+                                                    .map(|i| i.value()).unwrap_or_default();
+                                                if let Some(c) = core.borrow_mut().as_mut() {
+                                                    if val.is_empty() {
+                                                        c.prefs.theme_night_hour =
+                                                            crate::app::prefs::THEME_NIGHT_HOUR_DISABLED;
+                                                    } else if let Ok(h) = val.parse::<u8>() {
+                                                        c.prefs.theme_night_hour = h.min(23);
+                                                    }
+                                                    save_prefs(&c.prefs);
+                                                }
+                                                bump.set(now_ms());
+                                            })
+                                        }
+                                    />
+                                </label>
+
+                                <h3 class="advanced-subhead">{ locale.tr_key("settings.stash_density") }</h3>
+                                <div class="theme-picker">
+                                    { for [0u8, 1, 2].iter().map(|d| {
+                                        let is_active = c.prefs.stash_density == *d;
+                                        let cls = if is_active { "theme-btn active" } else { "theme-btn" };
+                                        let label = locale.tr_key(match *d {
+                                            1 => "settings.stash_density.compact",
+                                            2 => "settings.stash_density.tight",
+                                            _ => "settings.stash_density.comfortable",
+                                        });
+                                        let cb = {
+                                            let core = core_cell.clone();
+                                            let bump = bump.clone();
+                                            let val = *d;
+                                            Callback::from(move |_: MouseEvent| {
+                                                if let Some(c) = core.borrow_mut().as_mut() {
+                                                    c.prefs.stash_density = val;
+                                                    save_prefs(&c.prefs);
+                                                    crate::app::prefs::apply_visual_prefs(&c.prefs);
+                                                }
+                                                bump.set(now_ms());
+                                            })
+                                        };
+                                        html! {
+                                            <button class={cls} onclick={cb} disabled={is_active}>
+                                                { label }
+                                            </button>
+                                        }
+                                    }) }
+                                </div>
+
+                                <h3 class="advanced-subhead">{ locale.tr_key("settings.motto") }</h3>
+                                <p class="muted small">{ locale.tr_key("settings.motto_desc") }</p>
+                                <label class="setting-text">
+                                    <input type="text" maxlength="64"
+                                        value={c.prefs.motto.clone()}
+                                        oninput={
+                                            // Local save on every keystroke; debounce
+                                            // the publish RPC to `onchange` (fires on
+                                            // blur / Enter) so we don't spam the
+                                            // delegate during typing.
+                                            let core = core_cell.clone();
+                                            let bump = bump.clone();
+                                            Callback::from(move |e: InputEvent| {
+                                                let val = e.target_dyn_into::<web_sys::HtmlInputElement>()
+                                                    .map(|i| i.value())
+                                                    .unwrap_or_default();
+                                                if let Some(c) = core.borrow_mut().as_mut() {
+                                                    c.prefs.motto = val.chars().take(64).collect();
+                                                    save_prefs(&c.prefs);
+                                                }
+                                                bump.set(now_ms());
+                                            })
+                                        }
+                                        onchange={
+                                            let core = core_cell.clone();
+                                            let pending = pending.clone();
+                                            let bump = bump.clone();
+                                            Callback::from(move |_: Event| {
+                                                // Publish the current local motto +
+                                                // accent + frame so the next presence
+                                                // heartbeat picks it up.
+                                                let (motto, accent, frame) = {
+                                                    let g = core.borrow();
+                                                    match g.as_ref() {
+                                                        Some(c) => (
+                                                            c.prefs.motto.clone(),
+                                                            c.prefs.row_accent,
+                                                            c.inventory.routine.public_frame,
+                                                        ),
+                                                        None => (String::new(), 0u8, 0u8),
+                                                    }
+                                                };
+                                                crate::freenet::actions::activity::set_public_cosmetics_once(
+                                                    core.clone(), pending.clone(), bump.clone(),
+                                                    motto, accent, frame,
+                                                );
+                                            })
+                                        }
+                                        placeholder={locale.tr_key("settings.motto_placeholder").to_string()}
+                                    />
+                                </label>
+
+                                <h3 class="advanced-subhead">{ locale.tr_key("settings.hero_skin") }</h3>
+                                <p class="muted small">{ locale.tr_key("settings.hero_skin_desc") }</p>
+                                <div class="theme-picker">
+                                    { for ["", "😎", "🤠", "🥷", "🧛", "🦊", "🤖", "🧝"].iter().map(|skin| {
+                                        let is_active = c.prefs.hero_skin == *skin;
+                                        let cls = if is_active { "theme-btn active" } else { "theme-btn" };
+                                        let label = if skin.is_empty() {
+                                            locale.tr_key("settings.hero_skin.default").to_string()
+                                        } else {
+                                            skin.to_string()
+                                        };
+                                        let cb = {
+                                            let core = core_cell.clone();
+                                            let bump = bump.clone();
+                                            let val = skin.to_string();
+                                            Callback::from(move |_: MouseEvent| {
+                                                if let Some(c) = core.borrow_mut().as_mut() {
+                                                    c.prefs.hero_skin = val.clone();
+                                                    save_prefs(&c.prefs);
+                                                }
+                                                bump.set(now_ms());
+                                            })
+                                        };
+                                        html! {
+                                            <button class={cls} onclick={cb} disabled={is_active}>{ label }</button>
+                                        }
+                                    }) }
+                                </div>
+
+                                <h3 class="advanced-subhead">{ locale.tr_key("settings.public_cosmetics") }</h3>
+                                <p class="muted small">{ locale.tr_key("settings.public_cosmetics_desc") }</p>
+                                <div class="action-row">
+                                    <button onclick={
+                                        let core = core_cell.clone();
+                                        let pending = pending.clone();
+                                        let bump = bump.clone();
+                                        Callback::from(move |_: MouseEvent| {
+                                            // Re-read prefs at click time so user-edited
+                                            // motto/accent take effect even after typing.
+                                            let g = core.borrow();
+                                            let Some(c) = g.as_ref() else { return };
+                                            let motto = c.prefs.motto.clone();
+                                            let accent = c.prefs.row_accent;
+                                            // No separate "frame" pref yet; piggyback on accent
+                                            // for now so player has a single dial. Future PR can
+                                            // add a dedicated `publish_frame` UserPrefs field.
+                                            let frame = 0u8;
+                                            drop(g);
+                                            crate::freenet::actions::activity::set_public_cosmetics_once(
+                                                core.clone(), pending.clone(), bump.clone(),
+                                                motto, accent, frame,
+                                            )
+                                        })
+                                    }>{ locale.tr_key("settings.publish_cosmetics_btn") }</button>
+                                </div>
+
+                                <h3 class="advanced-subhead">{ locale.tr_key("settings.row_accent") }</h3>
+                                <p class="muted small">{ locale.tr_key("settings.row_accent_desc") }</p>
+                                <div class="accent-picker">
+                                    { for [0u8, 1, 2, 3, 4, 5, 6].iter().map(|a| {
+                                        let is_active = c.prefs.row_accent == *a;
+                                        let cls = if is_active { "accent-swatch active" } else { "accent-swatch" };
+                                        // Match the 6 leaderboard-row hues from feed.rs
+                                        // exactly so the swatch reads as a true preview
+                                        // of (a) the left-border ribbon and (b) the
+                                        // name/motto text colour. Background stays the
+                                        // panel default so the preview works on both
+                                        // light and dark themes.
+                                        let hue = match a {
+                                            1 => "#e57373",
+                                            2 => "#64b5f6",
+                                            3 => "#81c784",
+                                            4 => "#ffd54f",
+                                            5 => "#9575cd",
+                                            6 => "#ff8a65",
+                                            _ => "",
+                                        };
+                                        let style = if *a == 0 {
+                                            "border: 1px dashed currentColor;".to_string()
+                                        } else {
+                                            format!(
+                                                "box-shadow: inset 4px 0 0 0 {hue}; color: {hue}; font-weight: 600;"
+                                            )
+                                        };
+                                        let cb = {
+                                            let core = core_cell.clone();
+                                            let pending = pending.clone();
+                                            let bump = bump.clone();
+                                            let val = *a;
+                                            Callback::from(move |_: MouseEvent| {
+                                                // Update local pref, then fire the
+                                                // publish RPC so the next presence
+                                                // heartbeat carries the new accent.
+                                                // Read motto + current frame at click
+                                                // time so we don't lock-in stale values
+                                                // captured at render.
+                                                let (motto, frame) = {
+                                                    let g = core.borrow();
+                                                    match g.as_ref() {
+                                                        Some(c) => (
+                                                            c.prefs.motto.clone(),
+                                                            c.inventory.routine.public_frame,
+                                                        ),
+                                                        None => (String::new(), 0u8),
+                                                    }
+                                                };
+                                                if let Some(c) = core.borrow_mut().as_mut() {
+                                                    c.prefs.row_accent = val;
+                                                    save_prefs(&c.prefs);
+                                                }
+                                                crate::freenet::actions::activity::set_public_cosmetics_once(
+                                                    core.clone(), pending.clone(), bump.clone(),
+                                                    motto, val, frame,
+                                                );
+                                                bump.set(now_ms());
+                                            })
+                                        };
+                                        let title = if *a == 0 {
+                                            locale.tr_key("settings.row_accent.none").to_string()
+                                        } else {
+                                            format!("accent {a}")
+                                        };
+                                        let label = if *a == 0 {
+                                            locale.tr_key("settings.row_accent.none").to_string()
+                                        } else {
+                                            locale.tr_key("settings.row_accent.preview").to_string()
+                                        };
+                                        html! {
+                                            <button class={cls} onclick={cb}
+                                                    disabled={is_active}
+                                                    style={style}
+                                                    title={title}>
+                                                { label }
+                                            </button>
+                                        }
+                                    }) }
+                                </div>
+
+                                <h3 class="advanced-subhead">{ locale.tr_key("settings.hidden_tabs") }</h3>
+                                <p class="muted small">{ locale.tr_key("settings.hidden_tabs_desc") }</p>
+                                { for [
+                                    (Tab::WorldMap, "tab.world_map"),
+                                    (Tab::Shop, "tab.shop"),
+                                    (Tab::Guilds, "tab.guilds"),
+                                    (Tab::Achievements, "tab.achievements"),
+                                    (Tab::Mastery, "tab.mastery"),
+                                ].iter().map(|(tab, key)| {
+                                    let idx = *tab as u8;
+                                    let bit = 1u32 << idx;
+                                    let hidden = (c.prefs.hidden_tabs & bit) != 0;
+                                    let cb = {
+                                        let core = core_cell.clone();
+                                        let bump = bump.clone();
+                                        Callback::from(move |_: MouseEvent| {
+                                            if let Some(c) = core.borrow_mut().as_mut() {
+                                                c.prefs.hidden_tabs ^= bit;
+                                                save_prefs(&c.prefs);
+                                            }
+                                            bump.set(now_ms());
+                                        })
+                                    };
+                                    html! {
+                                        <label class="setting-toggle">
+                                            <input type="checkbox" checked={hidden} onclick={cb} />
+                                            { format!(" hide: {}", locale.tr_key(key)) }
+                                        </label>
+                                    }
+                                }) }
+
+                                <h3 class="advanced-subhead">{ locale.tr_key("settings.numerical_assists") }</h3>
+                                <p class="muted small">{ locale.tr_key("settings.numerical_assists_desc") }</p>
+                                { for [
+                                    ("settings.assist.enemy_hp_pct", 0u32),
+                                    ("settings.assist.hide_hero_hp_numbers", 1u32),
+                                    ("settings.assist.hide_damage_numbers", 2u32),
+                                ].iter().map(|(key, bit_idx)| {
+                                    let bit = 1u32 << bit_idx;
+                                    let on = (c.prefs.numerical_assists & bit) != 0;
+                                    let cb = {
+                                        let core = core_cell.clone();
+                                        let bump = bump.clone();
+                                        Callback::from(move |_: MouseEvent| {
+                                            if let Some(c) = core.borrow_mut().as_mut() {
+                                                c.prefs.numerical_assists ^= bit;
+                                                save_prefs(&c.prefs);
+                                            }
+                                            bump.set(now_ms());
+                                        })
+                                    };
+                                    html! {
+                                        <label class="setting-toggle">
+                                            <input type="checkbox" checked={on} onclick={cb} />
+                                            { locale.tr_key(key) }
+                                        </label>
+                                    }
+                                }) }
+
+                                <h3 class="advanced-subhead">{ locale.tr_key("settings.notifications") }</h3>
+                                <p class="muted small">{ locale.tr_key("settings.notifications_desc") }</p>
+                                { for [
+                                    (crate::app::types::ToastKind::Achievement, "settings.notif.achievement"),
+                                    (crate::app::types::ToastKind::LevelUp, "settings.notif.level_up"),
+                                    (crate::app::types::ToastKind::FormChange, "settings.notif.form_change"),
+                                    (crate::app::types::ToastKind::PotionIdle, "settings.notif.potion_idle"),
+                                ].iter().map(|(kind, key)| {
+                                    let bit = kind.bit();
+                                    let on = (c.prefs.toast_filter & bit) != 0;
+                                    let cb = {
+                                        let core = core_cell.clone();
+                                        let bump = bump.clone();
+                                        Callback::from(move |_: MouseEvent| {
+                                            if let Some(c) = core.borrow_mut().as_mut() {
+                                                c.prefs.toast_filter ^= bit;
+                                                save_prefs(&c.prefs);
+                                            }
+                                            bump.set(now_ms());
+                                        })
+                                    };
+                                    html! {
+                                        <label class="setting-toggle">
+                                            <input type="checkbox" checked={on} onclick={cb} />
+                                            { locale.tr_key(key) }
+                                        </label>
+                                    }
+                                }) }
+                            </details>
+
                             <details class="settings-advanced">
                                 <summary>{ locale.tr(MessageId::SettingsAdvanced) }</summary>
                                 <p class="muted small">
                                     { locale.tr(MessageId::SettingsAdvancedDesc) }
                                 </p>
 
-                                <label class="setting-toggle">
-                                    <input
-                                        type="checkbox"
-                                        checked={c.prefs.hide_pubkey}
-                                        onclick={mk_toggle_cb(ToggleField::HidePubkey)}
-                                    />
-                                    { locale.tr(MessageId::SettingsHidePubkey) }
-                                </label>
+                                <h3 class="advanced-subhead">{ locale.tr_key("settings.pubkey_display") }</h3>
+                                <p class="muted small">{ locale.tr_key("settings.pubkey_display_desc") }</p>
+                                <div class="theme-picker">
+                                    { for [
+                                        (crate::app::prefs::PUBKEY_DISPLAY_FULL, "settings.pubkey_display.full"),
+                                        (crate::app::prefs::PUBKEY_DISPLAY_SHORT, "settings.pubkey_display.short"),
+                                        (crate::app::prefs::PUBKEY_DISPLAY_HIDDEN, "settings.pubkey_display.hidden"),
+                                    ].iter().map(|(val, key)| {
+                                        let is_active = c.prefs.pubkey_display == *val;
+                                        let cls = if is_active { "theme-btn active" } else { "theme-btn" };
+                                        let cb = {
+                                            let core = core_cell.clone();
+                                            let bump = bump.clone();
+                                            let v = *val;
+                                            Callback::from(move |_: MouseEvent| {
+                                                if let Some(c) = core.borrow_mut().as_mut() {
+                                                    c.prefs.pubkey_display = v;
+                                                    // Keep legacy `hide_pubkey` in sync so old code
+                                                    // paths (and the leaderboard short-id logic)
+                                                    // that still read it don't desync.
+                                                    c.prefs.hide_pubkey =
+                                                        v == crate::app::prefs::PUBKEY_DISPLAY_HIDDEN;
+                                                    save_prefs(&c.prefs);
+                                                }
+                                                bump.set(now_ms());
+                                            })
+                                        };
+                                        html! {
+                                            <button class={cls} onclick={cb} disabled={is_active}>
+                                                { locale.tr_key(key) }
+                                            </button>
+                                        }
+                                    }) }
+                                </div>
 
                                 <label class="setting-toggle">
                                     <input
@@ -2552,16 +3448,286 @@ pub fn render_core(
 
 /// Legacy / Epoch dashboard rendered on the Settings tab (C1).
 /// Lists each node's current level, multiplier value, and next-cost,
+/// §C: Merchant exchange panel — single home for essence→gold and
+/// wheat→gold currency conversions. Hidden when neither side has
+/// anything to spend, so it doesn't sit as a dead stub for fresh
+/// players.
+fn render_exchange_panel(
+    c: &Core,
+    locale: Locale,
+    on_convert_essence: Callback<MouseEvent>,
+    on_sell_wheat: Callback<MouseEvent>,
+) -> Html {
+    let inv = &c.inventory;
+    let can_convert_essence = inv.essence > 0;
+    let can_sell_wheat = inv.wheat >= shared::WHEAT_PER_GOLD;
+    if !can_convert_essence && !can_sell_wheat {
+        return html! {};
+    }
+    html! {
+        <section class="panel exchange">
+            <h2>{ locale.tr_key("panel.exchange") }</h2>
+            <p class="muted small">{ locale.tr_key("panel.exchange_desc") }</p>
+            <div class="action-row">
+                {
+                    if can_convert_essence {
+                        let preview = format!(
+                            " ({} → {}g)",
+                            format_si(inv.essence),
+                            format_si(inv.essence.saturating_mul(shared::ESSENCE_TO_GOLD_RATE)),
+                        );
+                        html! {
+                            <button
+                                onclick={on_convert_essence}
+                                title={locale.tr_key("shop.convert_essence_tooltip")
+                                    .replace("{rate}", &shared::ESSENCE_TO_GOLD_RATE.to_string())}
+                            >
+                                { locale.tr_key("btn.convert_essence") }{ preview }
+                            </button>
+                        }
+                    } else { html! {} }
+                }
+                {
+                    if can_sell_wheat {
+                        let preview = format!(
+                            " ({} → {}g)",
+                            format_si(inv.wheat),
+                            format_si(inv.wheat / shared::WHEAT_PER_GOLD),
+                        );
+                        html! {
+                            <button
+                                onclick={on_sell_wheat}
+                                title={locale.fmt_sell_wheat_tooltip(shared::WHEAT_PER_GOLD as u64)}
+                            >
+                                { locale.tr(MessageId::BtnSellAllWheat) }{ preview }
+                            </button>
+                        }
+                    } else { html! {} }
+                }
+            </div>
+        </section>
+    }
+}
+
+/// Offline-cap preset buttons. Lifted out of the inline html!
+/// because the conditional `presets` array needs a `let` binding
+/// that the yew macro doesn't accept inside a `{ ... }`
+/// interpolation. Returns a Vec<Html> for splat into the
+/// `<div class="action-row">` parent.
+fn render_offline_cap_buttons(
+    inv: &shared::Inventory,
+    locale: Locale,
+    core_cell: CoreCell,
+    pending: PendingCell,
+    bump: yew::UseStateSetter<u64>,
+) -> Vec<Html> {
+    let lhf = inv.tokens.long_haul();
+    let presets: &[u8] = if lhf {
+        &[0, 1, 2, 4, 8, 12, 24, 48, 72, 168]
+    } else {
+        &[0, 1, 2, 4, 8, 12, 24]
+    };
+    presets
+        .iter()
+        .map(|h| {
+            let is_active = inv.routine.offline_cap_hours == *h;
+            let label = if *h == 0 {
+                locale.tr_key("routine.offline_cap.default").to_string()
+            } else {
+                format!("{h}h")
+            };
+            let cb = {
+                let core = core_cell.clone();
+                let pending = pending.clone();
+                let bump = bump.clone();
+                let val = *h;
+                Callback::from(move |_: MouseEvent| {
+                    crate::freenet::actions::activity::set_routine_offline_cap_hours_once(
+                        core.clone(),
+                        pending.clone(),
+                        bump.clone(),
+                        val,
+                    )
+                })
+            };
+            html! {
+                <button onclick={cb} class={if is_active { "primary" } else { "" }}>
+                    { label }
+                </button>
+            }
+        })
+        .collect()
+}
+
+/// §P3 daily check-in row rendered under the Hero name. Streak
+/// counter + claim button; button disabled (with "Claimed today"
+/// label) when the player has already claimed for the current
+/// UTC day.
+fn render_daily_checkin(
+    c: &Core,
+    locale: Locale,
+    core_cell: CoreCell,
+    pending: PendingCell,
+    bump: yew::UseStateSetter<u64>,
+) -> Html {
+    let now = crate::now_ms();
+    let today = now / 86_400_000;
+    let claimed_today = c.inventory.routine.last_checkin_day == today;
+    // First-time players (streak = 0 + already-claimed somehow,
+    // shouldn't happen but cheap to guard) get the same muted line
+    // as post-claim. The promient button only renders when a claim
+    // is actually available.
+    if claimed_today {
+        return html! {
+            <p class="daily-checkin daily-checkin-muted muted small">
+                { "🔥 " }
+                { locale.tr_key("daily.streak_label")
+                    .replace("{n}", &c.inventory.routine.streak_days.to_string()) }
+                { " · " }
+                { locale.tr_key("daily.claimed") }
+            </p>
+        };
+    }
+    let cb = Callback::from(move |_: MouseEvent| {
+        crate::freenet::actions::activity::claim_daily_checkin_once(
+            core_cell.clone(), pending.clone(), bump.clone(),
+        )
+    });
+    html! {
+        <p class="daily-checkin muted small">
+            { locale.tr_key("daily.streak_label")
+                .replace("{n}", &c.inventory.routine.streak_days.to_string()) }
+            { " " }
+            <button onclick={cb} title={locale.tr_key("daily.claim_tooltip")}>
+                { locale.tr_key("daily.claim") }
+            </button>
+        </p>
+    }
+}
+
+/// Render a panel with a collapse toggle in its `<h2>` header
+/// (§8 B2). The toggled state is persisted in
+/// `c.prefs.collapsed_panels` (one bit per `PANEL_BIT_*` constant)
+/// and saved to localStorage, so the player's choice survives
+/// reloads. Body is dropped from the DOM when collapsed —
+/// rendering empty would still cost layout.
+fn render_collapsible_panel(
+    panel_class: &str,
+    panel_bit: u8,
+    header_text: &str,
+    body: Html,
+    bits: u64,
+    core_cell: CoreCell,
+    bump: yew::UseStateSetter<u64>,
+) -> Html {
+    let collapsed = crate::app::prefs::is_panel_collapsed(bits, panel_bit);
+    let toggle_cb = {
+        let core = core_cell.clone();
+        let bump = bump.clone();
+        Callback::from(move |_: MouseEvent| {
+            if let Some(c) = core.borrow_mut().as_mut() {
+                c.prefs.collapsed_panels ^= 1u64 << panel_bit;
+                save_prefs(&c.prefs);
+            }
+            bump.set(now_ms());
+        })
+    };
+    html! {
+        <section class={classes!(panel_class.to_string(), if collapsed { "collapsed" } else { "" })}>
+            <h2>
+                <button class="panel-collapse-toggle" onclick={toggle_cb}>
+                    { if collapsed { "▸" } else { "▾" } }
+                </button>
+                { " " }{ header_text }
+            </h2>
+            { if collapsed { html! {} } else { body } }
+        </section>
+    }
+}
+
+/// Toolbar above the stash: slot filter + sort selector (§8 B1).
+/// Persists prefs to localStorage. No delegate-side state needed —
+/// this is purely a frontend filter on the existing `unequipped`
+/// list.
+fn render_stash_toolbar(
+    c: &Core,
+    locale: Locale,
+    core_cell: CoreCell,
+    bump: yew::UseStateSetter<u64>,
+) -> Html {
+    let cur_filter = c.prefs.stash_filter;
+    let cur_sort = c.prefs.stash_sort;
+
+    let mk_filter_cb = |slot: u8| {
+        let core = core_cell.clone();
+        let bump = bump.clone();
+        Callback::from(move |_: MouseEvent| {
+            if let Some(c) = core.borrow_mut().as_mut() {
+                c.prefs.stash_filter = slot;
+                crate::app::prefs::save_prefs(&c.prefs);
+            }
+            bump.set(now_ms());
+        })
+    };
+    let mk_sort_cb = |mode: u8| {
+        let core = core_cell.clone();
+        let bump = bump.clone();
+        Callback::from(move |_: MouseEvent| {
+            if let Some(c) = core.borrow_mut().as_mut() {
+                c.prefs.stash_sort = mode;
+                crate::app::prefs::save_prefs(&c.prefs);
+            }
+            bump.set(now_ms());
+        })
+    };
+
+    let filter_btn = |slot_label: String, slot_value: u8| -> Html {
+        let active = cur_filter == slot_value;
+        let cls = if active { "primary" } else { "" };
+        html! {
+            <button class={cls} onclick={mk_filter_cb(slot_value)}>{ slot_label }</button>
+        }
+    };
+    let sort_btn = |label_key: &str, mode: u8| -> Html {
+        let active = cur_sort == mode;
+        let cls = if active { "primary" } else { "" };
+        let label = locale.tr_key(label_key).to_string();
+        html! {
+            <button class={cls} onclick={mk_sort_cb(mode)}>{ label }</button>
+        }
+    };
+
+    html! {
+        <div class="stash-toolbar">
+            <span class="muted small">{ locale.tr_key("stash.filter_label") }</span>
+            { filter_btn(locale.tr_key("stash.filter_all").to_string(),
+                         crate::app::prefs::STASH_FILTER_NONE) }
+            { for (0..shared::SLOT_COUNT).map(|s| {
+                filter_btn(
+                    i18n_shared::slot_name(locale, s).to_string(),
+                    s as u8,
+                )
+            }) }
+            <span class="muted small" style="margin-left:1em">{ locale.tr_key("stash.sort_label") }</span>
+            { sort_btn("stash.sort_catalog", 0) }
+            { sort_btn("stash.sort_tier", 1) }
+            { sort_btn("stash.sort_score", 2) }
+        </div>
+    }
+}
+
 /// plus the Ascend button. Hidden entirely when the player has no
 /// stars *and* no purchased nodes — a fresh account doesn't need a
 /// prestige UI cluttering Settings yet.
-fn render_legacy_panel<F>(
+fn render_legacy_panel<F, G>(
     c: &Core,
     mk_buy_cb: &F,
+    mk_buy_bulk_cb: &G,
     on_ascend: Callback<MouseEvent>,
 ) -> Html
 where
     F: Fn(u8) -> Callback<MouseEvent>,
+    G: Fn(u8, u32) -> Callback<MouseEvent>,
 {
     let legacy = &c.inventory.legacy;
     let locale = c.prefs.locale;
@@ -2593,6 +3759,8 @@ where
                         let cost = node.next_cost(lvl);
                         let disabled = legacy.stars < cost;
                         let cb = mk_buy_cb(node.id());
+                        let cb_x10 = mk_buy_bulk_cb(node.id(), 10);
+                        let cb_max = mk_buy_bulk_cb(node.id(), 0);
                         let mult_label = format!(
                             "×{}.{:02}",
                             mult_bp / 10_000,
@@ -2617,17 +3785,30 @@ where
                                     <button onclick={cb} disabled={disabled}>
                                         { locale.tr(MessageId::BtnBuy) }
                                     </button>
+                                    { " " }
+                                    <button onclick={cb_x10} disabled={disabled}
+                                            title={locale.tr_key("mastery.buy_x10_tooltip")}>
+                                        { locale.tr_key("mastery.buy_x10") }
+                                    </button>
+                                    { " " }
+                                    <button onclick={cb_max} disabled={disabled}
+                                            title={locale.tr_key("mastery.buy_max_tooltip")}>
+                                        { locale.tr_key("mastery.buy_max") }
+                                    </button>
                                 </td>
                             </tr>
                         }
                     }) }
                 </tbody>
             </table>
-            <div class="action-row">
-                <button class="danger" onclick={on_ascend}>{ locale.tr(MessageId::BtnAscend) }</button>
-                <span class="muted small">
+            <div class="ascend-divider">
+                <h3>{ locale.tr_key("legacy.ascend_section") }</h3>
+                <p class="muted small">
                     { locale.tr(MessageId::LegacyAscendBlurb) }
-                </span>
+                </p>
+                <div class="action-row">
+                    <button class="danger" onclick={on_ascend}>{ locale.tr(MessageId::BtnAscend) }</button>
+                </div>
             </div>
         </section>
     }
@@ -2647,69 +3828,380 @@ fn render_routine_panel(
     bump: yew::UseStateSetter<u64>,
 ) -> Html {
     let inv = &c.inventory;
-    let any_worker = inv.base.base.estate.workers.values().any(|n| *n > 0);
-    if !any_worker {
-        return html! {};
-    }
+    // Used to gate the whole panel on `any_worker > 0` so a fresh
+    // player wasn't bombarded by routine knobs they had nothing to
+    // configure. In practice this hid the panel from post-Ascend
+    // players too — Ascend wipes Estate workers, but a player who
+    // has earned a Legacy star (= the Mastery tab is open) is
+    // categorically past the "fresh" stage and benefits from the
+    // gear/consumable/skill/battle sub-sections immediately.
+    // Estate sub-section still shows 0/0 rows but that's harmless.
+
+    // ----------- Estate sub-section -----------
+    let estate_table = html! {
+        <table class="legacy-grid">
+            <thead>
+                <tr>
+                    <th>{ locale.tr(MessageId::RoutineColTier) }</th>
+                    <th class="num">{ locale.tr(MessageId::RoutineColCurrent) }</th>
+                    <th class="num">{ locale.tr(MessageId::RoutineColTarget) }</th>
+                    <th>{ "" }</th>
+                </tr>
+            </thead>
+            <tbody>
+                { for shared::ESTATE_TIERS.iter().map(|tier| {
+                    let owned = inv.base.base.estate.workers_of(tier.id);
+                    let target = inv.routine.target_for(tier.id).unwrap_or(0);
+                    let cb_inc = {
+                        let core = core_cell.clone();
+                        let pending = pending.clone();
+                        let bump = bump.clone();
+                        let tid = tier.id;
+                        let next_target = target.saturating_add(1);
+                        Callback::from(move |_| {
+                            crate::freenet::actions::activity::set_routine_estate_target_once(
+                                core.clone(), pending.clone(), bump.clone(), tid, next_target,
+                            )
+                        })
+                    };
+                    let cb_dec = {
+                        let core = core_cell.clone();
+                        let pending = pending.clone();
+                        let bump = bump.clone();
+                        let tid = tier.id;
+                        let next_target = target.saturating_sub(1);
+                        Callback::from(move |_| {
+                            crate::freenet::actions::activity::set_routine_estate_target_once(
+                                core.clone(), pending.clone(), bump.clone(), tid, next_target,
+                            )
+                        })
+                    };
+                    let tier_key = format!("estate_tier_name.{}", tier.id);
+                    let tier_name_tr = locale.tr_key(&tier_key);
+                    let tier_label: &str = if tier_name_tr.starts_with('?') { tier.name } else { tier_name_tr };
+                    html! {
+                        <tr>
+                            <td>{ tier_label }</td>
+                            <td class="num">{ owned }</td>
+                            <td class="num">{ target }</td>
+                            <td>
+                                <button onclick={cb_dec} disabled={target == 0}>{ "−" }</button>
+                                { " " }
+                                <button onclick={cb_inc}>{ "+" }</button>
+                            </td>
+                        </tr>
+                    }
+                }) }
+            </tbody>
+        </table>
+    };
+
+    // ----------- Gear sub-section -----------
+    let cb_lock_current = {
+        let core = core_cell.clone();
+        let pending = pending.clone();
+        let bump = bump.clone();
+        Callback::from(move |_| {
+            crate::freenet::actions::activity::lock_routine_gear_to_equipped_once(
+                core.clone(), pending.clone(), bump.clone(),
+            )
+        })
+    };
+    let auto_equip_best = inv.routine.auto_equip_best_on_drop;
+    let cb_toggle_auto_equip = {
+        let core = core_cell.clone();
+        let pending = pending.clone();
+        let bump = bump.clone();
+        let next = !auto_equip_best;
+        Callback::from(move |_| {
+            crate::freenet::actions::activity::set_routine_auto_equip_best_once(
+                core.clone(), pending.clone(), bump.clone(), next,
+            )
+        })
+    };
+    let any_equipped = inv.equipped.iter().any(|s| s.is_some());
+    let gear_rows = html! {
+        <table class="legacy-grid">
+            <thead>
+                <tr>
+                    <th>{ locale.tr_key("routine.col_slot") }</th>
+                    <th class="num">{ locale.tr_key("routine.col_gear_target") }</th>
+                    <th>{ "" }</th>
+                </tr>
+            </thead>
+            <tbody>
+                { for (0..shared::SLOT_COUNT).map(|s| {
+                    let slot_idx = s as u8;
+                    let target = inv.routine.gear_target_for(slot_idx).unwrap_or(0);
+                    let cb = |new_tier: u8| {
+                        let core = core_cell.clone();
+                        let pending = pending.clone();
+                        let bump = bump.clone();
+                        Callback::from(move |_| {
+                            crate::freenet::actions::activity::set_routine_gear_target_once(
+                                core.clone(), pending.clone(), bump.clone(), slot_idx, new_tier,
+                            )
+                        })
+                    };
+                    html! {
+                        <tr>
+                            <td>{ i18n_shared::slot_name(locale, s) }</td>
+                            <td class="num">
+                                { if target == 0 { "—".to_string() } else { format!("T{target}") } }
+                            </td>
+                            <td>
+                                <button onclick={cb(0)} disabled={target == 0}>{ "off" }</button>
+                                { " " }
+                                <button onclick={cb(1)}>{ "T1" }</button>
+                                { " " }
+                                <button onclick={cb(2)}>{ "T2" }</button>
+                                { " " }
+                                <button onclick={cb(3)}>{ "T3" }</button>
+                            </td>
+                        </tr>
+                    }
+                }) }
+            </tbody>
+        </table>
+    };
+
+    // ----------- Consumables sub-section -----------
+    let mk_consumable_row = |kind: u8, label: &'static str| -> Html {
+        let target = inv.routine.consumable_target_for(kind).unwrap_or(0);
+        let cb_inc = {
+            let core = core_cell.clone();
+            let pending = pending.clone();
+            let bump = bump.clone();
+            let next = target.saturating_add(5);
+            Callback::from(move |_| {
+                crate::freenet::actions::activity::set_routine_consumable_target_once(
+                    core.clone(), pending.clone(), bump.clone(), kind, next,
+                )
+            })
+        };
+        let cb_dec = {
+            let core = core_cell.clone();
+            let pending = pending.clone();
+            let bump = bump.clone();
+            let next = target.saturating_sub(5);
+            Callback::from(move |_| {
+                crate::freenet::actions::activity::set_routine_consumable_target_once(
+                    core.clone(), pending.clone(), bump.clone(), kind, next,
+                )
+            })
+        };
+        html! {
+            <tr>
+                <td>{ label }</td>
+                <td class="num">{ target }</td>
+                <td>
+                    <button onclick={cb_dec} disabled={target == 0}>{ "−5" }</button>
+                    { " " }
+                    <button onclick={cb_inc}>{ "+5" }</button>
+                </td>
+            </tr>
+        }
+    };
+    let consumable_rows = html! {
+        <table class="legacy-grid">
+            <thead>
+                <tr>
+                    <th>{ locale.tr_key("routine.col_consumable") }</th>
+                    <th class="num">{ locale.tr_key("routine.col_keep") }</th>
+                    <th>{ "" }</th>
+                </tr>
+            </thead>
+            <tbody>
+                { mk_consumable_row(shared::CONSUMABLE_POTION, locale.tr(MessageId::ItemPotion)) }
+                { mk_consumable_row(shared::CONSUMABLE_FIREBALL, locale.tr(MessageId::ItemFireball)) }
+            </tbody>
+        </table>
+    };
+
+    // ----------- Skills + Battle-policy sub-section -----------
+    let auto_skill = inv.routine.auto_skill_unlock;
+    let cb_skill = {
+        let core = core_cell.clone();
+        let pending = pending.clone();
+        let bump = bump.clone();
+        let next = !auto_skill;
+        Callback::from(move |_| {
+            crate::freenet::actions::activity::set_routine_auto_skill_once(
+                core.clone(), pending.clone(), bump.clone(), next,
+            )
+        })
+    };
+    let policy = inv.routine.battle_action_policy;
+    let cb_policy_manual = {
+        let core = core_cell.clone();
+        let pending = pending.clone();
+        let bump = bump.clone();
+        Callback::from(move |_| {
+            crate::freenet::actions::activity::set_routine_battle_policy_once(
+                core.clone(), pending.clone(), bump.clone(),
+                shared::BattleActionPolicy::Manual,
+            )
+        })
+    };
+    let cb_policy_auto = {
+        let core = core_cell.clone();
+        let pending = pending.clone();
+        let bump = bump.clone();
+        Callback::from(move |_| {
+            crate::freenet::actions::activity::set_routine_battle_policy_once(
+                core.clone(), pending.clone(), bump.clone(),
+                shared::BattleActionPolicy::Auto {
+                    potion_below_hp_pct: 40,
+                    fireball_per_n_turns: 5,
+                },
+            )
+        })
+    };
+
+    let auto_label = if auto_skill {
+        locale.tr_key("routine.auto_skill_on")
+    } else {
+        locale.tr_key("routine.auto_skill_off")
+    };
+    let policy_label = match policy {
+        shared::BattleActionPolicy::Manual => locale.tr_key("routine.battle_manual"),
+        shared::BattleActionPolicy::Auto { .. } => locale.tr_key("routine.battle_auto"),
+    };
+
     html! {
         <section class="panel routine">
             <h2>{ locale.tr(MessageId::PanelRoutine) }</h2>
             <p class="muted small">{ locale.tr(MessageId::RoutineDesc) }</p>
-            <table class="legacy-grid">
-                <thead>
-                    <tr>
-                        <th>{ locale.tr(MessageId::RoutineColTier) }</th>
-                        <th class="num">{ locale.tr(MessageId::RoutineColCurrent) }</th>
-                        <th class="num">{ locale.tr(MessageId::RoutineColTarget) }</th>
-                        <th>{ "" }</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    { for shared::ESTATE_TIERS.iter().map(|tier| {
-                        let owned = inv.base.base.estate.workers_of(tier.id);
-                        let target = inv.routine.target_for(tier.id).unwrap_or(0);
-                        let cb_inc = {
-                            let core = core_cell.clone();
-                            let pending = pending.clone();
-                            let bump = bump.clone();
-                            let tid = tier.id;
-                            let next_target = target.saturating_add(1);
-                            Callback::from(move |_| {
-                                crate::freenet::actions::activity::set_routine_estate_target_once(
-                                    core.clone(), pending.clone(), bump.clone(), tid, next_target,
-                                )
-                            })
-                        };
-                        let cb_dec = {
-                            let core = core_cell.clone();
-                            let pending = pending.clone();
-                            let bump = bump.clone();
-                            let tid = tier.id;
-                            let next_target = target.saturating_sub(1);
-                            Callback::from(move |_| {
-                                crate::freenet::actions::activity::set_routine_estate_target_once(
-                                    core.clone(), pending.clone(), bump.clone(), tid, next_target,
-                                )
-                            })
-                        };
-                        let tier_key = format!("estate_tier_name.{}", tier.id);
-                        let tier_name_tr = locale.tr_key(&tier_key);
-                        let tier_label: &str = if tier_name_tr.starts_with('?') { tier.name } else { tier_name_tr };
-                        html! {
-                            <tr>
-                                <td>{ tier_label }</td>
-                                <td class="num">{ owned }</td>
-                                <td class="num">{ target }</td>
-                                <td>
-                                    <button onclick={cb_dec} disabled={target == 0}>{ "−" }</button>
-                                    { " " }
-                                    <button onclick={cb_inc}>{ "+" }</button>
-                                </td>
-                            </tr>
+
+            <h3>{ locale.tr_key("routine.section_estate") }</h3>
+            { estate_table }
+
+            <h3>{ locale.tr_key("routine.section_gear") }</h3>
+            <div class="action-row">
+                <button
+                    class={if auto_equip_best { "primary" } else { "" }}
+                    onclick={cb_toggle_auto_equip}
+                    title={locale.tr_key("routine.auto_equip_best_tooltip")}
+                >
+                    {
+                        if auto_equip_best {
+                            locale.tr_key("routine.auto_equip_best_on")
+                        } else {
+                            locale.tr_key("routine.auto_equip_best_off")
                         }
-                    }) }
-                </tbody>
-            </table>
+                    }
+                </button>
+                { " " }
+                <button onclick={cb_lock_current} disabled={!any_equipped}
+                        title={locale.tr_key("routine.lock_current_tooltip")}>
+                    { locale.tr_key("routine.lock_current") }
+                </button>
+            </div>
+            { gear_rows }
+
+            <h3>{ locale.tr_key("routine.section_consumables") }</h3>
+            { consumable_rows }
+
+            <h3>{ locale.tr_key("routine.section_skills") }</h3>
+            <p class="muted small">{ locale.tr_key("routine.auto_skill_desc") }</p>
+            <div class="action-row">
+                <button onclick={cb_skill}>{ auto_label }</button>
+            </div>
+
+            <h3>{ locale.tr_key("routine.section_battle") }</h3>
+            <p class="muted small">{ locale.tr_key("routine.battle_desc") }</p>
+            <div class="action-row">
+                <button
+                    class={if matches!(policy, shared::BattleActionPolicy::Manual) { "primary" } else { "" }}
+                    onclick={cb_policy_manual}>{ locale.tr_key("routine.battle_manual") }</button>
+                <button
+                    class={if matches!(policy, shared::BattleActionPolicy::Auto { .. }) { "primary" } else { "" }}
+                    onclick={cb_policy_auto}>{ locale.tr_key("routine.battle_auto") }</button>
+                <span class="muted small">{ format!(" — {policy_label}") }</span>
+            </div>
+
+            <h3>{ locale.tr_key("routine.section_offline_cap") }</h3>
+            <p class="muted small">{ locale.tr_key("routine.offline_cap_desc") }</p>
+            <div class="action-row">
+                { render_offline_cap_buttons(inv, locale, core_cell.clone(), pending.clone(), bump.clone()) }
+            </div>
+            {
+                if inv.routine.offline_cap_hours > 4 {
+                    html! {
+                        <p class="muted small">
+                            { locale.tr_key("routine.offline_cap.analytical_warning") }
+                        </p>
+                    }
+                } else { html! {} }
+            }
+
+            <h3>{ locale.tr_key("routine.section_mission_cycle") }</h3>
+            <p class="muted small">{ locale.tr_key("routine.mission_cycle_desc") }</p>
+            <div class="action-row">
+                { for [
+                    (shared::MISSION_CYCLE_STATIC, "routine.cycle.static"),
+                    (shared::MISSION_CYCLE_ROTATE, "routine.cycle.rotate"),
+                    (shared::MISSION_CYCLE_BOSS_FIRST, "routine.cycle.boss_first"),
+                ].iter().map(|(m, key)| {
+                    let is_active = inv.routine.mission_cycle_mode == *m;
+                    let cb = {
+                        let core = core_cell.clone();
+                        let pending = pending.clone();
+                        let bump = bump.clone();
+                        let mode = *m;
+                        let areas = inv.routine.mission_cycle_areas.clone();
+                        Callback::from(move |_: MouseEvent| {
+                            crate::freenet::actions::activity::set_routine_mission_cycle_once(
+                                core.clone(), pending.clone(), bump.clone(), mode, areas.clone(),
+                            )
+                        })
+                    };
+                    html! {
+                        <button onclick={cb} class={if is_active { "primary" } else { "" }}>
+                            { locale.tr_key(key) }
+                        </button>
+                    }
+                }) }
+            </div>
+            <p class="muted small">
+                { format!("{}: [{}]",
+                    locale.tr_key("routine.cycle_areas_current"),
+                    inv.routine.mission_cycle_areas
+                        .iter().map(|a| a.to_string()).collect::<Vec<_>>().join(", ")
+                ) }
+            </p>
+            <p class="muted small">{ locale.tr_key("routine.cycle_areas_hint") }</p>
+
+            <h3>{ locale.tr_key("routine.section_combat_speed") }</h3>
+            <p class="muted small">{ locale.tr_key("routine.combat_speed_desc") }</p>
+            <div class="action-row">
+                { for [
+                    (0u32, "1×"),
+                    (5_000u32, "0.5×"),
+                    (10_000u32, "1×"),
+                    (15_000u32, "1.5×"),
+                    (20_000u32, "2×"),
+                    (30_000u32, "3×"),
+                ].iter().map(|(bp, label)| {
+                    let is_active = inv.routine.combat_speed_bp == *bp;
+                    let cb = {
+                        let core = core_cell.clone();
+                        let pending = pending.clone();
+                        let bump = bump.clone();
+                        let val = *bp;
+                        Callback::from(move |_: MouseEvent| {
+                            crate::freenet::actions::activity::set_routine_combat_speed_once(
+                                core.clone(), pending.clone(), bump.clone(), val,
+                            )
+                        })
+                    };
+                    html! {
+                        <button onclick={cb} class={if is_active { "primary" } else { "" }}>
+                            { *label }
+                        </button>
+                    }
+                }) }
+            </div>
         </section>
     }
 }
@@ -2762,6 +4254,26 @@ fn render_insight_panel(
                                 )
                             })
                         };
+                        let cb_x10 = {
+                            let core = core_cell.clone();
+                            let pending = pending.clone();
+                            let bump = bump.clone();
+                            Callback::from(move |_| {
+                                crate::freenet::actions::activity::buy_insight_node_bulk_once(
+                                    core.clone(), pending.clone(), bump.clone(), nid, 10,
+                                )
+                            })
+                        };
+                        let cb_max = {
+                            let core = core_cell.clone();
+                            let pending = pending.clone();
+                            let bump = bump.clone();
+                            Callback::from(move |_| {
+                                crate::freenet::actions::activity::buy_insight_node_bulk_once(
+                                    core.clone(), pending.clone(), bump.clone(), nid, 0,
+                                )
+                            })
+                        };
                         let name_key = format!("insight_node_name.{}", node.key());
                         let desc_key = format!("insight_node_desc.{}", node.key());
                         let name_tr = locale.tr_key(&name_key);
@@ -2779,6 +4291,16 @@ fn render_insight_panel(
                                 <td>
                                     <button onclick={cb} disabled={disabled}>
                                         { locale.tr(MessageId::BtnBuy) }
+                                    </button>
+                                    { " " }
+                                    <button onclick={cb_x10} disabled={disabled}
+                                            title={locale.tr_key("mastery.buy_x10_tooltip")}>
+                                        { locale.tr_key("mastery.buy_x10") }
+                                    </button>
+                                    { " " }
+                                    <button onclick={cb_max} disabled={disabled}
+                                            title={locale.tr_key("mastery.buy_max_tooltip")}>
+                                        { locale.tr_key("mastery.buy_max") }
                                     </button>
                                 </td>
                             </tr>
@@ -2831,7 +4353,13 @@ fn render_boss_attack_panel(
                 } else {
                     html! {
                         <div class="action-row">
-                            <button class="primary" onclick={cb} disabled={!can_spend}>
+                            <button class="primary" onclick={cb} disabled={!can_spend}
+                                    title={locale.tr_key("boss.attack_tooltip")
+                                        .replace("{cost}", &shared::BOSS_ATTACK_ESSENCE_COST.to_string())
+                                        .replace("{dmg}", &shared::BOSS_ATTACK_DAMAGE.to_string())
+                                        .replace("{min_lvl}", &shared::BOSS_ATTACK_MIN_LEVEL.to_string())
+                                        .replace("{min_missions}", &shared::BOSS_ATTACK_MIN_MISSIONS.to_string())
+                                    }>
                                 { locale.tr(MessageId::BossAttackBtn) }
                             </button>
                         </div>
@@ -2973,7 +4501,7 @@ fn render_activities_panel(
                         let disabled = !unlocked && !is_active;
                         html! {
                             <tr>
-                                <td>{ a.name }</td>
+                                <td>{ i18n_shared::activity_name(locale, a) }</td>
                                 <td class="num">
                                     { format!("{}/s {}", a.yield_per_sec, res_label) }
                                 </td>
@@ -3054,25 +4582,29 @@ where
         by_depth.entry(d).or_default().push(area);
     }
     html! {
-        <div class="area-graph wilds">
+        <div id="area-graph-wilds" class="area-graph wilds">
+            <crate::app::widgets::GraphEdgeOverlay
+                host_id={"area-graph-wilds"}
+                bump={inv.area_clears.values().copied().sum::<u64>()
+                    .wrapping_add(inv.current_area as u64)
+                    .wrapping_add(1_000_000)}
+            />
             { for by_depth.iter().map(|(_depth, row_areas)| html! {
                 <div class="graph-row">
                     { for row_areas.iter().map(|a| {
                         let has_parent = !a.predecessors.is_empty();
-                        let upstream_label = if has_parent {
-                            let names: Vec<String> = a.predecessors
-                                .iter()
-                                .filter_map(|pid| wilds.iter().find(|x| x.id == *pid))
-                                .map(|p| p.name.to_string())
-                                .collect();
-                            Some(format!("↑ {}", names.join(" / ")))
-                        } else { None };
+                        let parent_ids_csv = a.predecessors.iter()
+                            .map(|p| p.to_string())
+                            .collect::<Vec<_>>()
+                            .join(",");
                         let node_cls = if has_parent { "graph-node has-parent" } else { "graph-node starter" };
+                        let area_id_str = a.id.to_string();
                         html! {
-                            <div class={node_cls}>
-                                { if let Some(label) = upstream_label.as_ref() {
-                                    html! { <p class="graph-edge-hint">{ label }</p> }
-                                } else { html! {} } }
+                            <div
+                                class={node_cls}
+                                data-area-id={area_id_str}
+                                data-parent-ids={parent_ids_csv}
+                            >
                                 { render_area_card(locale, a, inv.current_area, lvl, inv, mk_set_area_cb) }
                             </div>
                         }

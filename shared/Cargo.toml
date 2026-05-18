@@ -1,10 +1,15 @@
 [package]
 name = "idle-shared"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+# Wire-only types (presence, mailbox, guilds + PubKey aliases) live
+# in a sibling crate so the 3 contracts don't get rebuilt every
+# time game-logic code here is edited. See §6.6 in
+# `docs/planned-work-2026-05-17.md`.
+idle-shared-wire = { path = "../shared-wire" }
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
 bincode = "1.3"

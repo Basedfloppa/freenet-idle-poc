@@ -47,12 +47,32 @@ pub fn set_auto_run(
     Ok(inv)
 }
 
-/// Hard cap on how much offline time we'll simulate in one call —
-/// roughly an hour at the current 1 s tick. Avoids long-tail abuse
-/// (years of accumulated idle would crash the delegate's CPU budget)
-/// and keeps the catch-up loop's wall-time bounded.
-const MAX_CATCHUP_TICKS: u64 = 3_600;
+/// Default hard cap on how much offline time we'll simulate in
+/// one call — roughly an hour at the current 1 s tick. The
+/// player can lift this up to `MAX_CATCHUP_CAP_HOURS_BASE` (24h)
+/// via `routine.offline_cap_hours` (§8 B6), or up to
+/// `MAX_CATCHUP_CAP_HOURS_LHF` (168h / 7 days) when the
+/// LongHaulForeman token perk is owned. The hard ceiling exists so
+/// a catchup window can't burn the delegate's CPU budget — see
+/// `catch_up_auto` for the chunked-execution and analytical
+/// fast-path that keep wall-time bounded.
+const DEFAULT_CATCHUP_HOURS: u64 = 1;
+const MAX_CATCHUP_CAP_HOURS_BASE: u64 = 24;
+const MAX_CATCHUP_CAP_HOURS_LHF: u64 = 168;
+/// One delegate call processes at most this many simulated hours.
+/// Frontend re-fires the touch RPC (or any inventory-mutating
+/// action) until `auto_last_tick_ms >= now_ms`, drawing a progress
+/// bar in between. Keeps individual `process()` invocations inside
+/// the host's per-call time budget even for week-long catchups.
+const CATCHUP_CHUNK_HOURS: u64 = 24;
 const CATCHUP_TICK_MS: u64 = 1_000;
+/// Above this threshold the catchup switches from tick-by-tick
+/// simulation to an analytical per-hour-average computation
+/// (`analytical_catchup_chunk`). 4h tick-by-tick keeps the
+/// "interesting moments" feel of a short return; longer windows
+/// are too expensive to simulate per-tick and the player won't
+/// notice individual ticks anyway.
+const ANALYTICAL_THRESHOLD_HOURS: u64 = 4;
 /// Below this many simulated ticks the catch-up is "routine"
 /// (regular online pull at the default 10 s cadence) — we don't
 /// overwrite the banner with these. A noticeable offline window
@@ -77,22 +97,62 @@ pub fn catch_up_auto(inv: &mut Inventory, now_ms: u64) {
         inv.auto_last_tick_ms = now_ms;
         return;
     }
-    let elapsed = now_ms - inv.auto_last_tick_ms;
-    let mut ticks = elapsed / CATCHUP_TICK_MS;
-    if ticks == 0 {
+
+    // Effective catchup cap. `0` is the legacy-default sentinel
+    // (1h); explicit values are clamped server-side. The ceiling
+    // depends on the LongHaulForeman token perk: 24h without,
+    // 168h (7 days) with.
+    let ceiling_hours = if inv.tokens.long_haul() {
+        MAX_CATCHUP_CAP_HOURS_LHF
+    } else {
+        MAX_CATCHUP_CAP_HOURS_BASE
+    };
+    let cap_hours = if inv.routine.offline_cap_hours == 0 {
+        DEFAULT_CATCHUP_HOURS
+    } else {
+        (inv.routine.offline_cap_hours as u64).min(ceiling_hours)
+    };
+    let cap_ms = cap_hours.saturating_mul(3_600_000);
+
+    // Skip the un-catchable prefix once at the start of a long
+    // return: if the missed window exceeds `cap_ms`, the player
+    // forfeits the older part and catchup starts `cap_ms` before
+    // `now_ms`. Recomputed only once per catchup chain — once
+    // `auto_last_tick_ms` is inside the cap window, subsequent
+    // chunks don't slide the floor.
+    if now_ms - inv.auto_last_tick_ms > cap_ms {
+        inv.auto_last_tick_ms = now_ms - cap_ms;
+    }
+
+    // Single-chunk wall: process at most `CATCHUP_CHUNK_HOURS` per
+    // call. Frontend re-fires the touch RPC until
+    // `auto_last_tick_ms >= now_ms`, drawing a progress bar between
+    // chunks. Keeps each `process()` invocation inside the host's
+    // per-call CPU budget even for week-long catchups.
+    let remaining_ms = now_ms - inv.auto_last_tick_ms;
+    let chunk_ms = remaining_ms.min(CATCHUP_CHUNK_HOURS.saturating_mul(3_600_000));
+    if chunk_ms == 0 {
         return;
     }
-    if ticks > MAX_CATCHUP_TICKS {
-        ticks = MAX_CATCHUP_TICKS;
-    }
+
     let started_ms = inv.auto_last_tick_ms;
     let gold_before = inv.gold;
     let essence_before = inv.essence;
     let xp_before = inv.experience;
     let boss_before = inv.boss_damage;
     let mission_before = inv.mission_count;
+
+    // Split into a tick-by-tick prefix (up to ANALYTICAL_THRESHOLD_HOURS
+    // of *this chunk*) and an analytical tail. The tail extrapolates
+    // per-hour averages from the tick prefix, so a player who returns
+    // after a week sees per-tick "drama" for the first 4h of catchup
+    // and a smoothed average after that.
+    let tick_portion_ms = chunk_ms.min(ANALYTICAL_THRESHOLD_HOURS.saturating_mul(3_600_000));
+    let analytical_portion_ms = chunk_ms.saturating_sub(tick_portion_ms);
+
+    let tick_count = tick_portion_ms / CATCHUP_TICK_MS;
     let mut simulated_at = started_ms;
-    for _ in 0..ticks {
+    for _ in 0..tick_count {
         simulated_at = simulated_at.saturating_add(CATCHUP_TICK_MS);
         crate::state::apply_hp_regen(inv, simulated_at);
         if inv.current_hp == 0 {
@@ -108,11 +168,42 @@ pub fn catch_up_auto(inv: &mut Inventory, now_ms: u64) {
         }
         crate::combat::tick_battle(inv, simulated_at);
     }
+
+    // Analytical tail: extrapolate per-hour averages from the tick
+    // prefix. Sampled rates are zero for brand-new players (no
+    // tick prefix sampled in this chunk) — analytical extrapolation
+    // then awards nothing, which is the correct fallback. If a
+    // future chunk catches up enough tick prefix, subsequent
+    // analytical tails use the fresh sample.
+    if analytical_portion_ms > 0 && tick_portion_ms > 0 {
+        let sampled_hours = tick_portion_ms / 3_600_000;
+        if sampled_hours > 0 {
+            let analytical_hours = analytical_portion_ms / 3_600_000;
+            let gold_per_h = inv.gold.saturating_sub(gold_before) / sampled_hours;
+            let essence_per_h = inv.essence.saturating_sub(essence_before) / sampled_hours;
+            let xp_per_h = inv.experience.saturating_sub(xp_before) / sampled_hours;
+            let boss_per_h = inv.boss_damage.saturating_sub(boss_before) / sampled_hours;
+            let mission_per_h = inv.mission_count.saturating_sub(mission_before) / sampled_hours;
+            inv.gold = inv.gold.saturating_add(gold_per_h.saturating_mul(analytical_hours));
+            inv.essence = inv.essence.saturating_add(essence_per_h.saturating_mul(analytical_hours));
+            inv.experience = inv.experience.saturating_add(xp_per_h.saturating_mul(analytical_hours));
+            inv.boss_damage = inv.boss_damage.saturating_add(boss_per_h.saturating_mul(analytical_hours));
+            inv.mission_count = inv.mission_count.saturating_add(mission_per_h.saturating_mul(analytical_hours));
+        }
+        simulated_at = simulated_at.saturating_add(analytical_portion_ms);
+    }
+
     inv.auto_last_tick_ms = simulated_at;
     inv.last_action_ms = simulated_at;
     check_achievements(inv, now_ms);
-    if ticks >= CATCHUP_REPORT_THRESHOLD_TICKS {
+
+    let elapsed_simulated = simulated_at.saturating_sub(started_ms);
+    let report_threshold_ms = CATCHUP_REPORT_THRESHOLD_TICKS.saturating_mul(CATCHUP_TICK_MS);
+    if elapsed_simulated >= report_threshold_ms {
         let missions_total = inv.mission_count.saturating_sub(mission_before);
+        // `ticks_simulated` reports wall-clock ms / CATCHUP_TICK_MS
+        // so the legacy UI math (ticks → seconds) keeps working for
+        // both the tick-by-tick prefix and the analytical tail.
         // No clean "missions_lost" count in tick mode — a defeat
         // ends one mission early so the diff between "missions
         // started" and `missions_total` would be a rough proxy.
@@ -120,7 +211,7 @@ pub fn catch_up_auto(inv: &mut Inventory, now_ms: u64) {
         inv.last_catchup = Some(CatchupSummary {
             started_ms,
             ended_ms: simulated_at,
-            ticks_simulated: ticks as u32,
+            ticks_simulated: (elapsed_simulated / CATCHUP_TICK_MS) as u32,
             missions_won: missions_total as u32,
             missions_lost: 0,
             gold_gained: inv.gold.saturating_sub(gold_before),

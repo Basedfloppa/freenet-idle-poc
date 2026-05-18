@@ -547,7 +547,7 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 
 [[package]]
 name = "identity-delegate"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bincode",
  "ed25519-dalek",
@@ -559,7 +559,19 @@ dependencies = [
 
 [[package]]
 name = "idle-shared"
-version = "0.1.0"
+version = "0.2.0"
+dependencies = [
+ "bincode",
+ "ed25519-dalek",
+ "idle-shared-wire",
+ "serde",
+ "serde_bytes",
+ "sha2",
+]
+
+[[package]]
+name = "idle-shared-wire"
+version = "0.2.0"
 dependencies = [
  "bincode",
  "ed25519-dalek",

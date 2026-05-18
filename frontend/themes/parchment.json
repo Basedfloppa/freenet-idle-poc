@@ -1,0 +1,19 @@
+{
+  "_meta": {
+    "endonym": "Parchment",
+    "code": "parchment",
+    "scheme": "light"
+  },
+  "vars": {
+    "--bg-page": "#f7f5f0",
+    "--fg-strong": "#222",
+    "--accent-primary": "#d24a2a",
+    "--accent-win": "#2a6a2a",
+    "--accent-loss": "#aa3322",
+    "--accent-info": "#4a82c8",
+    "--accent-magic": "#6a5aaa",
+    "--accent-gold": "#8a6a1a",
+    "--accent-earth": "#b8a47a",
+    "--accent-grass": "#5aa050"
+  }
+}

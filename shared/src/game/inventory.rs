@@ -287,7 +287,11 @@ impl InventoryV11 {
 pub struct InventoryV12 {
     pub base: InventoryV11,
     /// Estate state — worker counts + last yield tick.
-    pub estate: super::estate::EstateState,
+    /// Locked to `EstateStateV1` to keep V12 bytes byte-identical to
+    /// what production writes; future extensions ship as
+    /// `EstateStateV2` inside a new `InventoryV(N+1)` (same pattern
+    /// as `RoutineStateV1`).
+    pub estate: super::estate::EstateStateV1,
     /// Single active idle action (`IDLE_ACTION_*` constants). The
     /// delegate ticks exactly one of `auto_run_enabled` or the
     /// Estate yield loop depending on the value here; the legacy
@@ -300,7 +304,7 @@ impl Default for InventoryV12 {
     fn default() -> Self {
         Self {
             base: InventoryV11::default(),
-            estate: super::estate::EstateState::default(),
+            estate: super::estate::EstateStateV1::default(),
             idle_action: super::estate::IDLE_ACTION_NONE,
         }
     }
@@ -331,7 +335,7 @@ impl From<InventoryV11> for InventoryV12 {
         };
         Self {
             base: v11,
-            estate: super::estate::EstateState::default(),
+            estate: super::estate::EstateStateV1::default(),
             idle_action,
         }
     }
@@ -346,14 +350,17 @@ impl From<InventoryV11> for InventoryV12 {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InventoryV13 {
     pub base: InventoryV12,
-    pub legacy: super::legacy::LegacyState,
+    /// Locked to `LegacyStateV1` for wire compatibility — see
+    /// the wire-format rule on `LegacyStateV1` and the canonical
+    /// `RoutineStateV1`/`V2` example in `routine.rs`.
+    pub legacy: super::legacy::LegacyStateV1,
 }
 
 impl Default for InventoryV13 {
     fn default() -> Self {
         Self {
             base: InventoryV12::default(),
-            legacy: super::legacy::LegacyState::default(),
+            legacy: super::legacy::LegacyStateV1::default(),
         }
     }
 }
@@ -375,7 +382,7 @@ impl From<InventoryV12> for InventoryV13 {
     fn from(v12: InventoryV12) -> Self {
         Self {
             base: v12,
-            legacy: super::legacy::LegacyState::default(),
+            legacy: super::legacy::LegacyStateV1::default(),
         }
     }
 }
@@ -383,6 +390,11 @@ impl From<InventoryV12> for InventoryV13 {
 /// V14 — adds per-zone activities (A1), Routine auto-hire (B1),
 /// Insight currency (B5), and Tokens (C2). Additive composition
 /// over V13, same wire-format rule as V11/V12/V13.
+///
+/// `routine` is locked to `RoutineStateV1` (frozen 1-field shape)
+/// to keep V14 bytes byte-identical to what production writes.
+/// V17 introduces the V2 routine shape via field-shadowing; see
+/// `InventoryV17` below.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InventoryV14 {
     pub base: InventoryV13,
@@ -393,9 +405,12 @@ pub struct InventoryV14 {
     /// Wall-clock anchor for activity accrual — analogue of
     /// `estate.last_tick_ms`.
     pub activity_last_tick_ms: u64,
-    pub routine: super::routine::RoutineState,
-    pub insight: super::insight::InsightState,
-    pub tokens: super::tokens::TokenState,
+    pub routine: super::routine::RoutineStateV1,
+    /// Locked to `InsightStateV1` — see wire-format rule on that
+    /// type and the canonical `RoutineStateV1`/`V2` example.
+    pub insight: super::insight::InsightStateV1,
+    /// Locked to `TokenStateV1` for the same reason as `insight`.
+    pub tokens: super::tokens::TokenStateV1,
 }
 
 impl Default for InventoryV14 {
@@ -404,9 +419,9 @@ impl Default for InventoryV14 {
             base: InventoryV13::default(),
             active_activity: super::activities::ACTIVITY_NONE,
             activity_last_tick_ms: 0,
-            routine: super::routine::RoutineState::default(),
-            insight: super::insight::InsightState::default(),
-            tokens: super::tokens::TokenState::default(),
+            routine: super::routine::RoutineStateV1::default(),
+            insight: super::insight::InsightStateV1::default(),
+            tokens: super::tokens::TokenStateV1::default(),
         }
     }
 }
@@ -430,9 +445,9 @@ impl From<InventoryV13> for InventoryV14 {
             base: v13,
             active_activity: super::activities::ACTIVITY_NONE,
             activity_last_tick_ms: 0,
-            routine: super::routine::RoutineState::default(),
-            insight: super::insight::InsightState::default(),
-            tokens: super::tokens::TokenState::default(),
+            routine: super::routine::RoutineStateV1::default(),
+            insight: super::insight::InsightStateV1::default(),
+            tokens: super::tokens::TokenStateV1::default(),
         }
     }
 }
@@ -491,10 +506,234 @@ impl From<InventoryV14> for InventoryV15 {
     }
 }
 
+/// V16 — adds `landmark_claims` (Wilds first-clear watermark per
+/// area_id). Additive composition over V15, same wire-format
+/// rule as earlier bumps.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InventoryV16 {
+    pub base: InventoryV15,
+    /// Per-Wilds-area watermark — first-clear timestamp_ms. Set
+    /// once when the player wins an encounter in a Wilds area
+    /// that has an associated landmark; subsequent clears in the
+    /// same area do not re-award the bundle.
+    pub landmark_claims: BTreeMap<u8, u64>,
+}
+
+impl Default for InventoryV16 {
+    fn default() -> Self {
+        Self {
+            base: InventoryV15::default(),
+            landmark_claims: BTreeMap::new(),
+        }
+    }
+}
+
+impl std::ops::Deref for InventoryV16 {
+    type Target = InventoryV15;
+    fn deref(&self) -> &InventoryV15 {
+        &self.base
+    }
+}
+
+impl std::ops::DerefMut for InventoryV16 {
+    fn deref_mut(&mut self) -> &mut InventoryV15 {
+        &mut self.base
+    }
+}
+
+impl From<InventoryV15> for InventoryV16 {
+    fn from(v15: InventoryV15) -> Self {
+        Self {
+            base: v15,
+            landmark_claims: BTreeMap::new(),
+        }
+    }
+}
+
+/// V17 — first version with the V2 routine shape (six fields).
+/// Embeds `InventoryV16` whole so the V14 frozen `routine: V1`
+/// stays in-memory but is shadowed by `Self::routine: V2` at the
+/// field-access level: `inv.routine` resolves to V17's field,
+/// while Deref-reachable V16 / V15 / V14 fields keep working.
+///
+/// `From<V16> for V17` lifts `v16.routine` (V1) into `V2` so old
+/// blobs migrate transparently. New writes always go through V17
+/// — see `InventoryWire::from(Inventory)` below.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InventoryV17 {
+    pub base: InventoryV16,
+    pub routine: super::routine::RoutineStateV2,
+}
+
+impl Default for InventoryV17 {
+    fn default() -> Self {
+        Self {
+            base: InventoryV16::default(),
+            routine: super::routine::RoutineStateV2::default(),
+        }
+    }
+}
+
+impl std::ops::Deref for InventoryV17 {
+    type Target = InventoryV16;
+    fn deref(&self) -> &InventoryV16 {
+        &self.base
+    }
+}
+
+impl std::ops::DerefMut for InventoryV17 {
+    fn deref_mut(&mut self) -> &mut InventoryV16 {
+        &mut self.base
+    }
+}
+
+impl From<InventoryV16> for InventoryV17 {
+    fn from(v16: InventoryV16) -> Self {
+        // Walk to V14 to grab the frozen V1 routine, then lift it
+        // into V2 with defaults for the five new fields.
+        let v1 = v16.base.base.routine.clone();
+        Self {
+            base: v16,
+            routine: super::routine::RoutineStateV2::from(v1),
+        }
+    }
+}
+
+/// V18 — adds the `auto_equip_best_on_drop` routine toggle by
+/// embedding the V17 base and shadowing `routine` with V3. Same
+/// field-shadowing trick as V17 (V17.routine: V2 shadowed V14's
+/// frozen V1). `From<V17> for V18` lifts V17's V2 routine into V3
+/// with the new field defaulted false.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InventoryV18 {
+    pub base: InventoryV17,
+    pub routine: super::routine::RoutineStateV3,
+}
+
+impl Default for InventoryV18 {
+    fn default() -> Self {
+        Self {
+            base: InventoryV17::default(),
+            routine: super::routine::RoutineStateV3::default(),
+        }
+    }
+}
+
+impl std::ops::Deref for InventoryV18 {
+    type Target = InventoryV17;
+    fn deref(&self) -> &InventoryV17 {
+        &self.base
+    }
+}
+
+impl std::ops::DerefMut for InventoryV18 {
+    fn deref_mut(&mut self) -> &mut InventoryV17 {
+        &mut self.base
+    }
+}
+
+impl From<InventoryV17> for InventoryV18 {
+    fn from(v17: InventoryV17) -> Self {
+        // V17.routine is V2; lift to V3 with the new toggle
+        // defaulted false. Clone is cheap (BTreeMaps share
+        // ownership semantics via Drop).
+        let v2 = v17.routine.clone();
+        Self {
+            base: v17,
+            routine: super::routine::RoutineStateV3::from(v2),
+        }
+    }
+}
+
+/// V19 — adds `routine: V4` (offline_cap_hours + mission cycle).
+/// Same shadow-field trick as V17 / V18. From<V18> lifts V18's V3
+/// routine into V4 with defaults preserving legacy behavior
+/// (offline_cap_hours = 0 → server falls back to 1-hour cap;
+/// mission_cycle_mode = 0 → static area).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InventoryV19 {
+    pub base: InventoryV18,
+    pub routine: super::routine::RoutineStateV4,
+}
+
+impl Default for InventoryV19 {
+    fn default() -> Self {
+        Self {
+            base: InventoryV18::default(),
+            routine: super::routine::RoutineStateV4::default(),
+        }
+    }
+}
+
+impl std::ops::Deref for InventoryV19 {
+    type Target = InventoryV18;
+    fn deref(&self) -> &InventoryV18 {
+        &self.base
+    }
+}
+
+impl std::ops::DerefMut for InventoryV19 {
+    fn deref_mut(&mut self) -> &mut InventoryV18 {
+        &mut self.base
+    }
+}
+
+impl From<InventoryV18> for InventoryV19 {
+    fn from(v18: InventoryV18) -> Self {
+        let v3 = v18.routine.clone();
+        Self {
+            base: v18,
+            routine: super::routine::RoutineStateV4::from(v3),
+        }
+    }
+}
+
+/// V20 — adds `routine: V5` (public cosmetics motto/accent/frame).
+/// Field-shadowing same as V17/V18/V19. From<V19> lifts V19's V4
+/// routine into V5 with empty cosmetics (no published motto / no
+/// accent / no frame).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InventoryV20 {
+    pub base: InventoryV19,
+    pub routine: super::routine::RoutineStateV5,
+}
+
+impl Default for InventoryV20 {
+    fn default() -> Self {
+        Self {
+            base: InventoryV19::default(),
+            routine: super::routine::RoutineStateV5::default(),
+        }
+    }
+}
+
+impl std::ops::Deref for InventoryV20 {
+    type Target = InventoryV19;
+    fn deref(&self) -> &InventoryV19 {
+        &self.base
+    }
+}
+
+impl std::ops::DerefMut for InventoryV20 {
+    fn deref_mut(&mut self) -> &mut InventoryV19 {
+        &mut self.base
+    }
+}
+
+impl From<InventoryV19> for InventoryV20 {
+    fn from(v19: InventoryV19) -> Self {
+        let v4 = v19.routine.clone();
+        Self {
+            base: v19,
+            routine: super::routine::RoutineStateV5::from(v4),
+        }
+    }
+}
+
 /// Public name for "the current inventory shape". Every consumer
 /// imports `Inventory`; only the persistence layer in the delegate
 /// is aware that this is a versioned type.
-pub type Inventory = InventoryV15;
+pub type Inventory = InventoryV20;
 
 /// On-disk wrapper. Append new variants at the end — deleting or
 /// reordering breaks the bincode discriminant for existing blobs.
@@ -507,33 +746,53 @@ pub enum InventoryWire {
     V13(InventoryV13),
     V14(InventoryV14),
     V15(InventoryV15),
+    V16(InventoryV16),
+    V17(InventoryV17),
+    V18(InventoryV18),
+    V19(InventoryV19),
+    V20(InventoryV20),
 }
 
 impl InventoryWire {
     /// Migrate any historical variant to the current `Inventory`.
     pub fn into_latest(self) -> Inventory {
         match self {
-            Self::V9(v9) => InventoryV15::from(InventoryV14::from(InventoryV13::from(
-                InventoryV12::from(InventoryV11::from(InventoryV10::from(v9))),
-            ))),
-            Self::V10(v10) => InventoryV15::from(InventoryV14::from(InventoryV13::from(
-                InventoryV12::from(InventoryV11::from(v10)),
-            ))),
-            Self::V11(v11) => InventoryV15::from(InventoryV14::from(InventoryV13::from(
-                InventoryV12::from(v11),
-            ))),
-            Self::V12(v12) => {
-                InventoryV15::from(InventoryV14::from(InventoryV13::from(v12)))
-            }
-            Self::V13(v13) => InventoryV15::from(InventoryV14::from(v13)),
-            Self::V14(v14) => InventoryV15::from(v14),
-            Self::V15(v15) => v15,
+            Self::V9(v9) => InventoryV20::from(InventoryV19::from(InventoryV18::from(InventoryV17::from(InventoryV16::from(
+                InventoryV15::from(InventoryV14::from(InventoryV13::from(InventoryV12::from(
+                    InventoryV11::from(InventoryV10::from(v9)),
+                )))),
+            ))))),
+            Self::V10(v10) => InventoryV20::from(InventoryV19::from(InventoryV18::from(InventoryV17::from(InventoryV16::from(
+                InventoryV15::from(InventoryV14::from(InventoryV13::from(InventoryV12::from(
+                    InventoryV11::from(v10),
+                )))),
+            ))))),
+            Self::V11(v11) => InventoryV20::from(InventoryV19::from(InventoryV18::from(InventoryV17::from(InventoryV16::from(
+                InventoryV15::from(InventoryV14::from(InventoryV13::from(InventoryV12::from(
+                    v11,
+                )))),
+            ))))),
+            Self::V12(v12) => InventoryV20::from(InventoryV19::from(InventoryV18::from(InventoryV17::from(InventoryV16::from(
+                InventoryV15::from(InventoryV14::from(InventoryV13::from(v12))),
+            ))))),
+            Self::V13(v13) => InventoryV20::from(InventoryV19::from(InventoryV18::from(InventoryV17::from(InventoryV16::from(
+                InventoryV15::from(InventoryV14::from(v13)),
+            ))))),
+            Self::V14(v14) => InventoryV20::from(InventoryV19::from(InventoryV18::from(InventoryV17::from(InventoryV16::from(
+                InventoryV15::from(v14),
+            ))))),
+            Self::V15(v15) => InventoryV20::from(InventoryV19::from(InventoryV18::from(InventoryV17::from(InventoryV16::from(v15))))),
+            Self::V16(v16) => InventoryV20::from(InventoryV19::from(InventoryV18::from(InventoryV17::from(v16)))),
+            Self::V17(v17) => InventoryV20::from(InventoryV19::from(InventoryV18::from(v17))),
+            Self::V18(v18) => InventoryV20::from(InventoryV19::from(v18)),
+            Self::V19(v19) => InventoryV20::from(v19),
+            Self::V20(v20) => v20,
         }
     }
 }
 
 impl From<Inventory> for InventoryWire {
     fn from(inv: Inventory) -> Self {
-        Self::V15(inv)
+        Self::V20(inv)
     }
 }

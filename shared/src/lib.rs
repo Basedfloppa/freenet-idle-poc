@@ -40,14 +40,22 @@
 //!   * v9 — added auto_run_enabled + auto_last_tick_ms + last_catchup
 //!         for delegate-side offline auto-mission progression.
 
+pub mod envelope;
 pub mod fmt;
-pub mod freenet;
 pub mod game;
 pub mod rpc;
 
+// Re-export the wire-only crate at the root so existing
+// `shared::PubKey` / `shared::PresencePayload` / etc. callsites
+// keep working unchanged after the §6.6 split (see
+// `docs/planned-work-2026-05-17.md`). The contracts pull these
+// types directly from `idle-shared-wire`; this crate gets them
+// transitively via the same re-export.
+pub use idle_shared_wire::*;
+
 // Backwards-compatible flat re-exports so existing
 // `shared::SomeType` import sites keep working.
+pub use envelope::*;
 pub use fmt::*;
-pub use freenet::*;
 pub use game::*;
 pub use rpc::*;

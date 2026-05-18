@@ -1,12 +1,13 @@
-//! Cross-cutting types — pubkey/signature length aliases, the
-//! delegate envelope that wraps every `DelegateRequest`/`Response`,
-//! and the secret-store ids the delegate uses internally.
+//! Delegate-side wire wrappers + secret-store ids. Lives in
+//! `idle-shared` (not `idle-shared-wire`) because the envelopes
+//! reference `crate::rpc::DelegateRequest`/`DelegateResponse`,
+//! and `rpc.rs` carries Inventory + game enums that have no
+//! business on the contract side.
+//!
+//! Contracts never see this — they only deserialize their own
+//! `ContractState` / `MailboxState` / `GuildsState`.
 
 use serde::{Deserialize, Serialize};
-
-pub const PUBKEY_LEN: usize = 32;
-pub const SIG_LEN: usize = 64;
-pub type PubKey = [u8; PUBKEY_LEN];
 
 /// Envelope wrapping a `DelegateRequest` with a webapp-chosen
 /// `request_id` so responses can be correlated. We carry the id in

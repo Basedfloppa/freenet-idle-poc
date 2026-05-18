@@ -80,6 +80,7 @@ fn app() -> Html {
                 last_published: Inventory::default(),
                 last_published_ms: None,
                 mission_in_flight: false,
+                catchup_progress: None,
                 others: BTreeMap::new(),
                 cumulative_damage: BTreeMap::new(),
                 ws: None,
@@ -87,7 +88,7 @@ fn app() -> Html {
                 delegate_key,
                 status: "connecting…".into(),
                 prefs_loaded: false,
-                current_tab: Tab::Farm,
+                current_tab: Tab::Home,
                 current_theme: DEFAULT_THEME.into(),
                 prefs: load_prefs(),
                 last_auto_tick_ms: 0,
@@ -101,6 +102,10 @@ fn app() -> Html {
                 new_guild_name_input: String::new(),
                 toasts: Vec::new(),
                 shown_achievements: None,
+                last_level_shown: None,
+                last_form_shown: None,
+                animate_skills: std::collections::BTreeSet::new(),
+                last_skills_shown: None,
                 revealed_animated: None,
                 animate_reveal: 0,
                 // Wizard always opens at step 0 on cold load. The
@@ -111,11 +116,19 @@ fn app() -> Html {
                 catchup_modal_dismissed: false,
                 last_catchup_acked_started_ms: 0,
                 map_view: crate::app::types::MapView::default(),
+                pending_confirm: None,
             });
             // Apply the default theme for first paint; the delegate's
             // `LoadUiPrefs` reply re-applies the player's saved theme
             // once the WS handshake completes.
             apply_theme(DEFAULT_THEME);
+            // §8 B4/D2/D3 visual prefs (reduced-motion, reduced-flash,
+            // stash-density) — apply at first paint so CSS gates land
+            // before any UI renders.
+            let prefs_snapshot = core.borrow().as_ref().map(|c| c.prefs.clone());
+            if let Some(p) = prefs_snapshot {
+                crate::app::prefs::apply_visual_prefs(&p);
+            }
             bump_setter.set(now_ms());
 
             connect_and_setup(core.clone(), pending.clone(), bump_setter.clone());
@@ -184,6 +197,7 @@ fn app() -> Html {
                                 c.last_auto_tick_ms,
                                 c.last_heartbeat_tick_ms,
                                 c.last_pull_tick_ms,
+                                c.catchup_progress.is_some(),
                             )
                         })
                     };
@@ -198,6 +212,7 @@ fn app() -> Html {
                         last_auto,
                         last_heartbeat,
                         last_pull,
+                        catchup_in_progress,
                     )) = snapshot else { return };
                     let now = now_ms();
 
@@ -227,6 +242,22 @@ fn app() -> Html {
 
                     // Heartbeat publish — only useful once we have a
                     // pubkey to sign with.
+                    // §8 B8 theme schedule. Cheap check on every tick:
+                    // if the schedule produces a code that differs
+                    // from the active <html data-theme>, re-apply.
+                    // Hour transitions happen at most once per minute
+                    // so this is a no-op the rest of the time.
+                    if let Some(target) = crate::app::prefs::schedule_theme_for_now(&prefs) {
+                        let current = web_sys::window()
+                            .and_then(|w| w.document())
+                            .and_then(|d| d.document_element())
+                            .and_then(|r| r.get_attribute("data-theme"))
+                            .unwrap_or_default();
+                        if !target.is_empty() && current != target {
+                            apply_theme(&target);
+                        }
+                    }
+
                     if has_pubkey
                         && now.saturating_sub(last_heartbeat) >= prefs.sync_cadence.heartbeat_ms()
                     {
@@ -254,23 +285,37 @@ fn app() -> Html {
                                     bump.clone(),
                                 );
                             }
-                        } else if now.saturating_sub(last_pull) >= prefs.sync_cadence.pull_ms() {
-                            if let Some(c) = core.borrow_mut().as_mut() {
-                                c.last_pull_tick_ms = now;
+                        } else {
+                            // While chunked catchup is in progress, override
+                            // the user's pull cadence with a tight loop so
+                            // the catchup completes in seconds instead of
+                            // dragging across many normal heartbeats. We
+                            // still gate on `last_pull` to avoid stacking
+                            // unbounded in-flight calls — POLL_TICK_MS
+                            // (~1s) is the minimum spacing.
+                            let pull_interval = if catchup_in_progress {
+                                POLL_TICK_MS as u64
+                            } else {
+                                prefs.sync_cadence.pull_ms()
+                            };
+                            if now.saturating_sub(last_pull) >= pull_interval {
+                                if let Some(c) = core.borrow_mut().as_mut() {
+                                    c.last_pull_tick_ms = now;
+                                }
+                                pull_inventory_once(core.clone(), pending.clone(), bump.clone());
+                                // Workaround for the freenet-core regression where
+                                // `UpdateNotification` is never delivered for the
+                                // locally-hosted presence contract (observed
+                                // 2026-05-15, see pull_presence.rs). A bare Get
+                                // refreshes `c.others` from the local cache so
+                                // the leaderboard advances at `pull_ms` cadence
+                                // instead of staying frozen at the initial state.
+                                crate::freenet::actions::pull_presence::pull_presence_state_once(
+                                    core.clone(),
+                                    pending.clone(),
+                                    bump.clone(),
+                                );
                             }
-                            pull_inventory_once(core.clone(), pending.clone(), bump.clone());
-                            // Workaround for the freenet-core regression where
-                            // `UpdateNotification` is never delivered for the
-                            // locally-hosted presence contract (observed
-                            // 2026-05-15, see pull_presence.rs). A bare Get
-                            // refreshes `c.others` from the local cache so
-                            // the leaderboard advances at `pull_ms` cadence
-                            // instead of staying frozen at the initial state.
-                            crate::freenet::actions::pull_presence::pull_presence_state_once(
-                                core.clone(),
-                                pending.clone(),
-                                bump.clone(),
-                            );
                         }
                     }
 
@@ -358,7 +403,61 @@ fn boot_loader(c: &Core) -> Html {
 fn main() {
     wasm_logger::init(wasm_logger::Config::default());
     set_shell_title("Freenet Idle PoC");
+    install_keyboard_shortcuts();
     yew::Renderer::<App>::new().render();
+}
+
+/// §8 D4: document-level keydown listener that routes hotkeys to
+/// buttons tagged with `data-shortcut="X"`. Off by default —
+/// gated on `UserPrefs.keyboard_shortcuts` so a player who didn't
+/// opt in doesn't get surprised. Ignores keys when focus is in
+/// a text input / textarea / contenteditable so typing in the
+/// name / motto field is unaffected.
+fn install_keyboard_shortcuts() {
+    use wasm_bindgen::closure::Closure;
+    use wasm_bindgen::JsCast;
+    let Some(window) = web_sys::window() else { return };
+    let Some(document) = window.document() else { return };
+    let doc_for_cb = document.clone();
+    let cb = Closure::<dyn Fn(web_sys::KeyboardEvent)>::new(move |e: web_sys::KeyboardEvent| {
+        // Honour the opt-in pref.
+        let prefs = crate::app::prefs::load_prefs();
+        if !prefs.keyboard_shortcuts {
+            return;
+        }
+        // Don't fight form inputs.
+        if let Some(active) = doc_for_cb.active_element() {
+            let tag = active.tag_name().to_lowercase();
+            if tag == "input" || tag == "textarea" {
+                return;
+            }
+            if active
+                .get_attribute("contenteditable")
+                .map(|v| v == "true")
+                .unwrap_or(false)
+            {
+                return;
+            }
+        }
+        if e.ctrl_key() || e.meta_key() || e.alt_key() {
+            return;
+        }
+        let key = e.key();
+        let normalized = key.to_uppercase();
+        let target_key: String = normalized.chars().next().map(|c| c.to_string()).unwrap_or_default();
+        if target_key.is_empty() {
+            return;
+        }
+        let selector = format!("button[data-shortcut=\"{}\"]", target_key);
+        let Ok(Some(node)) = doc_for_cb.query_selector(&selector) else { return };
+        let Ok(btn) = node.dyn_into::<web_sys::HtmlButtonElement>() else { return };
+        if !btn.disabled() {
+            btn.click();
+            e.prevent_default();
+        }
+    });
+    let _ = window.add_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref());
+    cb.forget();
 }
 
 /// Tell the outer freenet gateway shell to display this string as the

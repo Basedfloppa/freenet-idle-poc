@@ -18,7 +18,20 @@ pub const MAX_PAYLOAD_BYTES: usize = 256;
 /// future contracts can dispatch on it instead of rejecting every
 /// older payload outright. Bump whenever a field is added or its
 /// meaning changes.
-pub const PRESENCE_PAYLOAD_VERSION: u8 = 2;
+pub const PRESENCE_PAYLOAD_VERSION: u8 = 3;
+
+/// Range of `PresencePayload` versions that the deployed contract
+/// is willing to accept on the wire. The set MUST include the
+/// current `PRESENCE_PAYLOAD_VERSION` (so freshly-built clients
+/// can publish) and SHOULD include the immediately-prior version
+/// (so a rollout where old webapps haven't refreshed yet doesn't
+/// silently drop their entries). Drop the oldest entry only after
+/// confirming no live client still publishes it.
+pub const ACCEPTED_PAYLOAD_VERSIONS: &[u8] = &[2, 3];
+
+/// Max bytes for the optional public motto field (§E2). Same cap
+/// as `MAX_NAME_BYTES` so leaderboard layout doesn't stretch.
+pub const MAX_MOTTO_BYTES: usize = 32;
 
 /// Schema version of `ContractState`. Same forward-compat hook as
 /// `PRESENCE_PAYLOAD_VERSION`: future contract code that wants to
@@ -65,8 +78,12 @@ pub const MAX_CUMULATIVE_KEYS: usize = 10_000;
 /// understands multiple schema versions can dispatch on it instead of
 /// failing every old payload outright. Today only
 /// `PRESENCE_PAYLOAD_VERSION` (=1) is accepted by `ContractState::apply`.
+/// Frozen V2 shape — what production currently writes. Required
+/// for byte-compat decoding of v=2 entries when the contract is
+/// running v=3 schema (§E-tier rollout). Do NOT add fields here;
+/// extensions go into `PresencePayloadV3 { base: V2, … }`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PresencePayload {
+pub struct PresencePayloadV2 {
     pub version: u8,
     #[serde(with = "byte_array_32")]
     pub public_key: PubKey,
@@ -95,6 +112,49 @@ pub struct PresencePayload {
     pub champion: bool,
 }
 
+/// Current V3 shape — adds public cosmetics (§E-tier):
+/// motto (≤ `MAX_MOTTO_BYTES`), accent (color preset id, 0 = none),
+/// frame (badge frame id, 0 = none). `base: V2` makes the V2-portion
+/// of the wire bytes byte-identical so a v=2 contract can still
+/// decode the V2 prefix.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PresencePayloadV3 {
+    pub base: PresencePayloadV2,
+    /// Public motto, ≤ `MAX_MOTTO_BYTES`. Surfaced on the
+    /// leaderboard under the display name. Display-only — never
+    /// fed into boss aggregate or ranking.
+    pub motto: String,
+    /// Leaderboard-row accent id, `0` = no accent, `1..=6` = preset
+    /// hue from the same palette `UserPrefs.row_accent` uses
+    /// locally. Other clients honour the publisher's accent on
+    /// their own copy of the leaderboard.
+    pub accent: u8,
+    /// Leaderboard-row frame id, `0` = no frame, `1..` = one of the
+    /// preset frame decorations. Unused frames render fall back to
+    /// `0`; contract doesn't enumerate.
+    pub frame: u8,
+}
+
+impl std::ops::Deref for PresencePayloadV3 {
+    type Target = PresencePayloadV2;
+    fn deref(&self) -> &PresencePayloadV2 {
+        &self.base
+    }
+}
+
+impl From<PresencePayloadV2> for PresencePayloadV3 {
+    fn from(v2: PresencePayloadV2) -> Self {
+        Self {
+            base: v2,
+            motto: String::new(),
+            accent: 0,
+            frame: 0,
+        }
+    }
+}
+
+pub type PresencePayload = PresencePayloadV3;
+
 impl PresencePayload {
     pub fn new(
         public_key: PubKey,
@@ -107,16 +167,48 @@ impl PresencePayload {
         champion: bool,
     ) -> Self {
         Self {
-            version: PRESENCE_PAYLOAD_VERSION,
-            public_key,
-            name,
-            gold,
-            boss_damage,
-            area,
-            timestamp_ms,
-            area_id,
-            champion,
+            base: PresencePayloadV2 {
+                version: PRESENCE_PAYLOAD_VERSION,
+                public_key,
+                name,
+                gold,
+                boss_damage,
+                area,
+                timestamp_ms,
+                area_id,
+                champion,
+            },
+            motto: String::new(),
+            accent: 0,
+            frame: 0,
         }
+    }
+
+    /// V3 constructor that sets the public cosmetics in one shot.
+    /// Used by the delegate's `publish_presence` path when the
+    /// player has set local cosmetic prefs to publish.
+    pub fn new_with_cosmetics(
+        public_key: PubKey,
+        name: String,
+        gold: u64,
+        boss_damage: u64,
+        area: String,
+        timestamp_ms: u64,
+        area_id: u8,
+        champion: bool,
+        motto: String,
+        accent: u8,
+        frame: u8,
+    ) -> Self {
+        let mut p = Self::new(
+            public_key, name, gold, boss_damage, area, timestamp_ms, area_id, champion,
+        );
+        // Truncate motto to the wire cap so a misbehaving frontend
+        // can't bloat the payload past `MAX_PAYLOAD_BYTES`.
+        p.motto = motto.chars().take(MAX_MOTTO_BYTES).collect();
+        p.accent = accent;
+        p.frame = frame;
+        p
     }
 }
 
@@ -129,13 +221,38 @@ pub struct SignedEntry {
 }
 
 impl SignedEntry {
+    /// Best-effort decode. Dispatches on the first byte of the
+    /// payload (the `version` field — bincode writes structs in
+    /// declaration order so `version` is always at offset 0).
+    /// Returns the latest schema shape (V3); older V2 payloads
+    /// are lifted to V3 with empty cosmetics.
     pub fn decode(&self) -> Option<PresencePayload> {
-        bincode::deserialize(&self.payload).ok()
+        let v = self.payload.first().copied()?;
+        match v {
+            2 => bincode::deserialize::<PresencePayloadV2>(&self.payload)
+                .ok()
+                .map(PresencePayloadV3::from),
+            3 => bincode::deserialize::<PresencePayloadV3>(&self.payload).ok(),
+            _ => None,
+        }
     }
 
     pub fn verify(&self) -> Result<PresencePayload, &'static str> {
-        let payload: PresencePayload =
-            bincode::deserialize(&self.payload).map_err(|_| "deserialize")?;
+        // Same version-dispatch as `decode`, but verifies the
+        // signature against the original payload bytes (not the
+        // lifted V3 — the publisher signed whatever shape they
+        // wrote, not the lifted representation).
+        let v = self.payload.first().copied().ok_or("empty payload")?;
+        let payload = match v {
+            2 => {
+                let v2: PresencePayloadV2 =
+                    bincode::deserialize(&self.payload).map_err(|_| "deserialize v2")?;
+                PresencePayloadV3::from(v2)
+            }
+            3 => bincode::deserialize::<PresencePayloadV3>(&self.payload)
+                .map_err(|_| "deserialize v3")?,
+            _ => return Err("unsupported version"),
+        };
         let vk = VerifyingKey::from_bytes(&payload.public_key).map_err(|_| "bad pubkey")?;
         let sig = Signature::from_bytes(&self.signature);
         vk.verify(&self.payload, &sig).map_err(|_| "bad signature")?;
@@ -143,8 +260,15 @@ impl SignedEntry {
     }
 }
 
+/// V1 of the presence contract state. Wrapper-chain pattern (see
+/// `docs/planned-work-2026-05-17.md` §6.2): future additive fields
+/// land on `ContractStateV2 { base: ContractStateV1, new_field }`
+/// with a `From<V1>` shim. The public alias `ContractState` always
+/// points at the latest version. Byte format frozen — `pub version`
+/// is the in-band schema tag accepted by `apply` (today
+/// `CONTRACT_STATE_VERSION`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ContractState {
+pub struct ContractStateV1 {
     /// Schema version. First field on the wire — forward-compat hook
     /// for future versions of the state shape. Today the contract
     /// only accepts `CONTRACT_STATE_VERSION`.
@@ -158,7 +282,11 @@ pub struct ContractState {
     pub cumulative_damage: BTreeMap<PubKey, u64>,
 }
 
-impl Default for ContractState {
+/// Latest `ContractState` — re-aliased here so calling code uses a
+/// stable name. Bump this alias when a new version lands.
+pub type ContractState = ContractStateV1;
+
+impl Default for ContractStateV1 {
     fn default() -> Self {
         Self {
             version: CONTRACT_STATE_VERSION,
@@ -168,7 +296,7 @@ impl Default for ContractState {
     }
 }
 
-impl ContractState {
+impl ContractStateV1 {
     /// LWW + sanity merge. An entry is accepted iff:
     ///   * the signature verifies against the embedded pubkey,
     ///   * the raw payload fits in `MAX_PAYLOAD_BYTES`,
@@ -206,7 +334,12 @@ impl ContractState {
             Ok(p) => p,
             Err(_) => return false,
         };
-        if payload.version != PRESENCE_PAYLOAD_VERSION {
+        // Accept any version listed in `ACCEPTED_PAYLOAD_VERSIONS`.
+        // Plain equality with the current version would lock out
+        // partially-rolled-out clients during a wire bump; the range
+        // gives a one-version overlap window. See §6.4 of
+        // `docs/planned-work-2026-05-17.md`.
+        if !ACCEPTED_PAYLOAD_VERSIONS.contains(&payload.version) {
             return false;
         }
         if payload.name.len() > MAX_NAME_BYTES || payload.area.len() > MAX_AREA_BYTES {

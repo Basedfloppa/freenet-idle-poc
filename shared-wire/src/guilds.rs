@@ -140,13 +140,20 @@ pub struct Guild {
     pub founded_ms: u64,
 }
 
+/// V1 of the guilds contract state. Same wrapper-chain pattern as
+/// [`crate::presence::ContractStateV1`] — additive bumps land as
+/// `GuildsStateV2 { base: V1, new_field }`. Public alias
+/// `GuildsState` tracks the latest.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct GuildsState {
+pub struct GuildsStateV1 {
     pub version: u8,
     pub guilds: Vec<Guild>,
 }
 
-impl Default for GuildsState {
+/// Latest `GuildsState`. Bump this alias when a new version lands.
+pub type GuildsState = GuildsStateV1;
+
+impl Default for GuildsStateV1 {
     fn default() -> Self {
         Self {
             version: GUILDS_STATE_VERSION,
@@ -155,7 +162,7 @@ impl Default for GuildsState {
     }
 }
 
-impl GuildsState {
+impl GuildsStateV1 {
     /// Find which guild the given pubkey is currently a member of,
     /// if any. Linear scan — fine at our scale (256 × 50 = 12_800).
     pub fn membership(&self, pk: &PubKey) -> Option<usize> {

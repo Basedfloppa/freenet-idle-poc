@@ -1,6 +1,6 @@
 [package]
 name = "idle-frontend"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
@@ -43,7 +43,12 @@ features = [
     "Request",
     "RequestInit",
     "HtmlElement",
+    "HtmlHeadElement",
+    "HtmlButtonElement",
     "HtmlInputElement",
+    "HtmlSelectElement",
+    "HtmlStyleElement",
+    "KeyboardEvent",
     "Storage",
     "Location",
     "WebSocket",
@@ -64,4 +69,6 @@ features = [
     "DomException",
     "Event",
     "Navigator",
+    "DomRect",
+    "NodeList",
 ]

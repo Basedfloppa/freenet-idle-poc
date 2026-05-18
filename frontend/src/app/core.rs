@@ -37,6 +37,19 @@ pub struct Core {
     /// True while a `RunMission` is in flight — used to disable the
     /// button and prevent overlapping calls in auto-mode.
     pub mission_in_flight: bool,
+    /// Chunked offline catchup progress (`Some` only while the
+    /// catchup is in-flight). `start_gap_ms` is the wall-clock gap
+    /// at the moment we first observed the catchup; `current_gap_ms`
+    /// is the gap after the most recent `LoadInventory` response.
+    /// Progress = 1 - current/start. Cleared when current_gap drops
+    /// below `CATCHUP_DONE_GAP_MS` (single tick worth).
+    ///
+    /// While `Some`, the polling loop overrides the user's
+    /// `sync_cadence.pull_ms()` and fires back-to-back
+    /// `LoadInventory` calls so the catchup completes in seconds,
+    /// not in minutes-of-heartbeat. A modal blocks every other
+    /// interaction until the catchup ends.
+    pub catchup_progress: Option<CatchupProgress>,
     // The persistent auto-run flag now lives in `inventory.auto_run_enabled`
     // — single source of truth, delegate-authoritative, survives reloads.
     // Click handlers mutate it optimistically and reconcile via the
@@ -114,6 +127,26 @@ pub struct Core {
     /// initial load establishes the baseline silently (no flood
     /// of "you unlocked X 200 missions ago" toasts on reconnect).
     pub shown_achievements: Option<std::collections::BTreeSet<u8>>,
+    /// Last hero level a toast was already shown for. `None` on
+    /// cold load — first ingest establishes the baseline silently
+    /// (no toast on reconnect for the level you were already at).
+    /// Bumps fire a Toast { "Уровень N → N+1" } the next ingest.
+    pub last_level_shown: Option<u64>,
+    /// Last `inv.current_form` value surfaced to the player via the
+    /// form-change toast. `None` = first-load baseline (no toast).
+    /// Compared in `ingest_inventory`; any change fires one toast
+    /// listing the new form's allowed slot mask so the player
+    /// understands why some gear just slid into the stash.
+    pub last_form_shown: Option<u8>,
+    /// §P3: set of skill ids that should get the `skill-unlock-anim`
+    /// CSS class on the upcoming render pass. Populated by
+    /// `ingest_inventory` when `skills_unlocked` grows; cleared by
+    /// the next ingest so the animation fires exactly once.
+    pub animate_skills: std::collections::BTreeSet<u8>,
+    /// Baseline of skill ids the player has already seen. `None` on
+    /// first load — establishes the baseline silently so a returning
+    /// player doesn't see every skill animate.
+    pub last_skills_shown: Option<std::collections::BTreeSet<u8>>,
     /// Reveal-key bits that have already played their slide-in
     /// animation in this session. Initialised on first inventory
     /// load to the full `revealed` bitmask — returning players
@@ -160,6 +193,65 @@ pub struct Core {
     /// delegate or the inventory. Default Linear because Wilds
     /// is gated on level 10+ anyway.
     pub map_view: super::types::MapView,
+    /// Pending custom confirm-modal (§8.A8). When `Some`, the modal
+    /// blocks every other interaction until the user accepts or
+    /// cancels. UI-only — never persisted.
+    pub pending_confirm: Option<PendingConfirm>,
+}
+
+/// Snapshot of in-progress offline catchup. See
+/// `Core::catchup_progress` for the lifecycle and rationale.
+#[derive(Clone, Copy, Debug)]
+pub struct CatchupProgress {
+    /// Wall-clock gap (`now_ms - auto_last_tick_ms`) observed when
+    /// the catchup first started. Used as the denominator for the
+    /// progress fraction.
+    pub start_gap_ms: u64,
+    /// Most-recently observed gap. Equals `start_gap_ms` on the
+    /// first frame and shrinks toward zero with each chunk.
+    pub current_gap_ms: u64,
+    /// Effective offline cap (hours) at the time the catchup
+    /// started — surfaced in the modal copy so the player knows
+    /// the simulated window length even after the visible gap has
+    /// shrunk.
+    pub cap_hours: u8,
+}
+
+/// Gap (ms) at or below which the catchup is considered "done".
+/// One catchup tick is `CATCHUP_TICK_MS = 1_000`; we treat anything
+/// under a few seconds of drift as caught up so the modal closes
+/// cleanly even if the delegate's clock is slightly ahead.
+pub const CATCHUP_DONE_GAP_MS: u64 = 5_000;
+/// Gap (ms) at or above which the catchup modal opens. Anything
+/// shorter is normal heartbeat drift and shouldn't pop a modal.
+pub const CATCHUP_OPEN_GAP_MS: u64 = 60_000;
+
+/// Confirm-modal staging slot. Each destructive callsite that wants
+/// a custom confirm pushes one of these into `core.pending_confirm`
+/// instead of calling `window.confirm()` directly. The
+/// `<ConfirmModal>` reads it, renders the message, and runs
+/// `on_confirm` when the user accepts.
+#[derive(Clone)]
+pub struct PendingConfirm {
+    /// Pre-localized message body. The modal renders it verbatim.
+    pub message: String,
+    /// Action to dispatch on OK. Captures whatever context the
+    /// originating callsite needs (RPC sender clones, payload ids).
+    pub on_confirm: std::rc::Rc<dyn Fn()>,
+}
+
+/// Filtered toast-push. Drops the toast if `prefs.toast_filter`
+/// has the bit for `kind` cleared (§8 B5); otherwise enforces the
+/// `MAX_TOASTS` cap by evicting the oldest. Centralises the cap +
+/// filter logic so individual callsites stay readable.
+pub fn push_toast(c: &mut Core, kind: super::types::ToastKind, toast: Toast) {
+    if (c.prefs.toast_filter & kind.bit()) == 0 {
+        return;
+    }
+    if c.toasts.len() >= MAX_TOASTS {
+        c.toasts.remove(0);
+    }
+    c.toasts.push(toast);
 }
 
 /// Apply a fresh `Inventory` from the delegate into `Core`,
@@ -173,23 +265,117 @@ pub fn ingest_inventory(c: &mut Core, inv: Inventory) {
     let current: std::collections::BTreeSet<u8> =
         inv.achievement_unlocks.keys().copied().collect();
     let locale = c.prefs.locale;
-    match c.shown_achievements.as_mut() {
+    let new_achievement_ids: Vec<u8> = match c.shown_achievements.as_mut() {
         None => {
             c.shown_achievements = Some(current);
+            Vec::new()
         }
         Some(seen) => {
-            let new_ids: Vec<u8> = current.difference(seen).copied().collect();
-            for id in new_ids {
-                if c.toasts.len() >= MAX_TOASTS {
-                    c.toasts.remove(0);
-                }
-                c.toasts.push(Toast {
-                    label: format!("🏆 {}", i18n_shared::achievement_label(locale, id)),
-                    body: i18n_shared::achievement_reason(locale, id),
+            let news: Vec<u8> = current.difference(seen).copied().collect();
+            for id in &news {
+                seen.insert(*id);
+            }
+            news
+        }
+    };
+    for id in new_achievement_ids {
+        push_toast(c, super::types::ToastKind::Achievement, Toast {
+            label: format!("🏆 {}", i18n_shared::achievement_label(locale, id)),
+            body: i18n_shared::achievement_reason(locale, id),
+            created_ms: now,
+        });
+    }
+    // Level-up toast. First-load baselines silently; later ingests
+    // diff the level and push one toast per crossing.
+    let cur_level = shared::level_of(&inv);
+    match c.last_level_shown {
+        None => {
+            c.last_level_shown = Some(cur_level);
+        }
+        Some(prev) if cur_level > prev => {
+            for new_lvl in (prev + 1)..=cur_level {
+                push_toast(c, super::types::ToastKind::LevelUp, Toast {
+                    label: format!("⬆ {}", locale.tr_key("toast.level_up_title")
+                        .replace("{lvl}", &new_lvl.to_string())),
+                    body: locale.tr_key("toast.level_up_body")
+                        .replace("{lvl}", &new_lvl.to_string()),
                     created_ms: now,
                 });
-                seen.insert(id);
             }
+            c.last_level_shown = Some(cur_level);
+        }
+        _ => {}
+    }
+    // Form-change toast. First-load baselines silently; later
+    // ingests fire one toast per transition so the player knows
+    // why some gear was just moved to the stash and which slots
+    // the new form locks them out of.
+    let cur_form = inv.current_form;
+    match c.last_form_shown {
+        None => {
+            c.last_form_shown = Some(cur_form);
+        }
+        Some(prev) if prev != cur_form => {
+            let form_label = crate::app::i18n_shared::form_name(locale, cur_form);
+            let mask = shared::form_slot_mask(cur_form);
+            let mut allowed = Vec::with_capacity(shared::SLOT_COUNT);
+            for slot_idx in 0..shared::SLOT_COUNT {
+                if mask[slot_idx] {
+                    allowed.push(crate::app::i18n_shared::slot_name(locale, slot_idx));
+                }
+            }
+            let slots_str = allowed.join(", ");
+            push_toast(c, super::types::ToastKind::FormChange, Toast {
+                label: format!(
+                    "🔁 {}",
+                    locale
+                        .tr_key("toast.form_change.title")
+                        .replace("{form}", form_label)
+                ),
+                body: locale
+                    .tr_key("toast.form_change.body")
+                    .replace("{slots}", &slots_str),
+                created_ms: now,
+            });
+            c.last_form_shown = Some(cur_form);
+        }
+        _ => {}
+    }
+    // Idle-potion feedback toast. The "Use" button outside combat
+    // is otherwise a silent click — HP bar fills, count -1, no
+    // confirmation. Fire when potions decremented while no battle
+    // was running on either side of the ingest. `healed > 0` skips
+    // the at-full-HP no-op case where the heal returned no delta.
+    if c.inventory.current_battle.is_none()
+        && inv.current_battle.is_none()
+        && c.inventory.potions > inv.potions
+    {
+        let healed = inv.current_hp.saturating_sub(c.inventory.current_hp);
+        if healed > 0 {
+            push_toast(c, super::types::ToastKind::PotionIdle, Toast {
+                label: format!("🧪 {}", locale.tr_key("toast.potion_idle.title")),
+                body: locale
+                    .tr_key("toast.potion_idle.body")
+                    .replace("{hp}", &healed.to_string()),
+                created_ms: now,
+            });
+        }
+    }
+    // §P3 skill-up animation. Diff `skills_unlocked` against the
+    // baseline; freshly unlocked ids land in `animate_skills` for
+    // the upcoming render pass. Baseline is set silently on first
+    // ingest so returning players don't see every skill pulse.
+    let cur_skills: std::collections::BTreeSet<u8> =
+        inv.skills_unlocked.keys().copied().collect();
+    match c.last_skills_shown.as_ref() {
+        None => {
+            c.last_skills_shown = Some(cur_skills);
+            c.animate_skills.clear();
+        }
+        Some(seen) => {
+            let new_skills: Vec<u8> = cur_skills.difference(seen).copied().collect();
+            c.animate_skills = new_skills.iter().copied().collect();
+            c.last_skills_shown = Some(seen.union(&cur_skills).copied().collect());
         }
     }
     // Reveal-bit animation gating. First load is silent: the
@@ -209,6 +395,47 @@ pub fn ingest_inventory(c: &mut Core, inv: Inventory) {
             let newly = inv.revealed & !prev;
             c.animate_reveal = newly;
             c.revealed_animated = Some(prev | inv.revealed);
+        }
+    }
+    // Chunked offline catchup tracking. The delegate's
+    // `catch_up_auto` processes at most one chunk
+    // (CATCHUP_CHUNK_HOURS=24h) per call and advances
+    // `auto_last_tick_ms` toward `now_ms`. If a gap is still
+    // visible here, the catchup isn't finished — store a snapshot
+    // for the modal and let the polling loop fire another
+    // LoadInventory immediately. When the gap drops below
+    // CATCHUP_DONE_GAP_MS we clear the slot.
+    let gap_ms = now.saturating_sub(inv.auto_last_tick_ms);
+    if inv.auto_last_tick_ms == 0 || !inv.auto_run_enabled {
+        // Either fresh save (auto-run was never started) or the
+        // player disabled auto-run — no catchup to do.
+        c.catchup_progress = None;
+    } else if gap_ms <= CATCHUP_DONE_GAP_MS {
+        c.catchup_progress = None;
+    } else {
+        match c.catchup_progress {
+            None if gap_ms >= CATCHUP_OPEN_GAP_MS => {
+                c.catchup_progress = Some(CatchupProgress {
+                    start_gap_ms: gap_ms,
+                    current_gap_ms: gap_ms,
+                    cap_hours: if inv.routine.offline_cap_hours == 0 {
+                        1
+                    } else {
+                        inv.routine.offline_cap_hours
+                    },
+                });
+            }
+            Some(mut p) => {
+                p.current_gap_ms = gap_ms;
+                if gap_ms > p.start_gap_ms {
+                    // Player's clock drifted forward, or auto-run
+                    // was re-enabled mid-session — reset the
+                    // denominator so progress stays in [0, 1].
+                    p.start_gap_ms = gap_ms;
+                }
+                c.catchup_progress = Some(p);
+            }
+            _ => {}
         }
     }
     c.inventory = inv;

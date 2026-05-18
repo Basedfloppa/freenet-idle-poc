@@ -89,6 +89,8 @@ where
 pub fn render_stash_grouped<E, S, SA, F>(
     locale: Locale,
     inv: &Inventory,
+    filter_slot: u8,
+    sort_mode: u8,
     mk_equip: &E,
     mk_sell: &S,
     mk_sell_all: &SA,
@@ -110,6 +112,15 @@ where
     let mut by_slot: Vec<Vec<u16>> = (0..SLOT_COUNT).map(|_| Vec::new()).collect();
     for cid in &inv.unequipped {
         if let Some(t) = gear_template(*cid) {
+            // Apply user-set slot filter (§8 B1). `STASH_FILTER_NONE`
+            // (0xFF) is the "show every slot" sentinel; any other
+            // value is a slot index — items in other slots are
+            // dropped before grouping.
+            if filter_slot != crate::app::prefs::STASH_FILTER_NONE
+                && t.slot != filter_slot
+            {
+                continue;
+            }
             by_slot[t.slot as usize].push(*cid);
         }
     }
@@ -121,6 +132,18 @@ where
         *counts_by_id.entry(*cid).or_insert(0) += 1;
     }
 
+    // If filter dropped everything, give the player a visible cue
+    // instead of an empty white space — the toolbar above the
+    // stash has the "Show all slots" reset.
+    let all_empty = by_slot.iter().all(|v| v.is_empty());
+    if all_empty {
+        return html! {
+            <p class="muted small">
+                { locale.tr_key("stash.filter_empty") }
+            </p>
+        };
+    }
+
     html! {
         <div class="stash-grouped">
             { for (0..SLOT_COUNT).filter_map(|slot_idx| {
@@ -130,9 +153,26 @@ where
                 }
                 // Distinct catalog ids in this slot, in stable order.
                 let mut seen: std::collections::BTreeSet<u16> = std::collections::BTreeSet::new();
-                let distinct: Vec<u16> = items.iter().filter_map(|c| {
+                let mut distinct: Vec<u16> = items.iter().filter_map(|c| {
                     if seen.insert(*c) { Some(*c) } else { None }
                 }).collect();
+                // Apply user-set sort (§8 B1) before render:
+                //   * mode 0 = catalog order (legacy, BTreeSet iteration)
+                //   * mode 1 = tier descending
+                //   * mode 2 = score descending (atk + def + hp)
+                match sort_mode {
+                    1 => distinct.sort_by(|a, b| {
+                        let ta = gear_template(*a).map(|t| t.tier).unwrap_or(0);
+                        let tb = gear_template(*b).map(|t| t.tier).unwrap_or(0);
+                        tb.cmp(&ta)
+                    }),
+                    2 => distinct.sort_by(|a, b| {
+                        let sa = gear_template(*a).map(|t| t.atk + t.def + t.hp).unwrap_or(0);
+                        let sb = gear_template(*b).map(|t| t.atk + t.def + t.hp).unwrap_or(0);
+                        sb.cmp(&sa)
+                    }),
+                    _ => {}
+                }
                 Some(html! {
                     <div class="stash-group">
                         <h4 class="stash-group-name">
@@ -141,7 +181,11 @@ where
                         <div class="stash-items">
                             { for distinct.iter().map(|cid| {
                                 let count = *counts_by_id.get(cid).unwrap_or(&0);
-                                render_stash_row(locale, *cid, count, inv.essence, mk_equip, mk_sell, mk_sell_all, mk_forge)
+                                render_stash_row(
+                                    locale, *cid, count, inv.essence,
+                                    inv.equipped[slot_idx],
+                                    mk_equip, mk_sell, mk_sell_all, mk_forge,
+                                )
                             }) }
                         </div>
                     </div>
@@ -161,6 +205,7 @@ pub fn render_stash_row<E, S, SA, F>(
     catalog_id: u16,
     owned_count: usize,
     essence: u64,
+    equipped_in_slot: Option<u16>,
     mk_equip: &E,
     mk_sell: &S,
     mk_sell_all: &SA,
@@ -186,8 +231,22 @@ where
     } else {
         format!("×{}", owned_count)
     };
+    // §P3 compare-tool: hover-tooltip showing delta vs equipped.
+    // Empty slot or unknown gear → no tooltip. Equip-or-sell call
+    // sites already exist; this just informs the choice.
+    let compare_tooltip = match equipped_in_slot.and_then(gear_template) {
+        Some(eq) => {
+            let d_atk = (t.atk as i64) - (eq.atk as i64);
+            let d_def = (t.def as i64) - (eq.def as i64);
+            let d_hp = (t.hp as i64) - (eq.hp as i64);
+            let fmt = |v: i64| if v > 0 { format!("+{v}") } else { v.to_string() };
+            format!("vs equipped: atk {} · def {} · hp {}",
+                    fmt(d_atk), fmt(d_def), fmt(d_hp))
+        }
+        None => "no piece equipped in this slot".to_string(),
+    };
     html! {
-        <div class={format!("stash-item tier-{}", t.tier)}>
+        <div class={format!("stash-item tier-{}", t.tier)} title={compare_tooltip}>
             <span class="stash-name">
                 { i18n_shared::gear_name(locale, &t) }
                 { if count_text.is_empty() { html!{} } else { html!{<span class="stash-count">{count_text}</span>} } }
@@ -196,19 +255,25 @@ where
             <span class="stash-stats muted small">{ stat_blurb(&t) }</span>
             <div class="stash-actions">
                 <button class="stash-equip" onclick={mk_equip(catalog_id)}>{ locale.tr(MessageId::BtnEquip) }</button>
-                <button class="stash-sell" onclick={mk_sell(catalog_id)} title={format!("sell for {sell_price} gold")}>
-                    { format!("sell {sell_price}g") }
+                <button class="stash-sell" onclick={mk_sell(catalog_id)}
+                        title={locale.tr_key("stash.sell_one_tooltip")
+                            .replace("{gold}", &sell_price.to_string())}>
+                    { locale.tr_key("stash.sell_one")
+                        .replace("{gold}", &sell_price.to_string()) }
                 </button>
                 {
                     // Bulk-sell only renders for multi-copy rows so
-                    // the single-item card stays compact. Reads
-                    // `sell ×N (total g)`.
+                    // the single-item card stays compact.
                     if owned_count > 1 {
                         let total = sell_price.saturating_mul(owned_count as u64);
                         html! {
                             <button class="stash-sell" onclick={mk_sell_all(catalog_id)}
-                                    title={format!("sell all {} copies for {total} gold", owned_count)}>
-                                { format!("sell ×{} ({total}g)", owned_count) }
+                                    title={locale.tr_key("stash.sell_all_tooltip")
+                                        .replace("{count}", &owned_count.to_string())
+                                        .replace("{gold}", &total.to_string())}>
+                                { locale.tr_key("stash.sell_all")
+                                    .replace("{count}", &owned_count.to_string())
+                                    .replace("{gold}", &total.to_string()) }
                             </button>
                         }
                     } else { html! {} }
@@ -216,16 +281,24 @@ where
                 {
                     if forge_available {
                         let title = if !forge_enough_copies {
-                            format!("need {} copies (have {})", FORGE_COUNT, owned_count)
+                            locale.tr_key("stash.forge_need_copies")
+                                .replace("{n}", &FORGE_COUNT.to_string())
+                                .replace("{have}", &owned_count.to_string())
                         } else if !forge_enough_essence {
-                            format!("need {forge_cost} essence (have {essence})")
+                            locale.tr_key("stash.forge_need_essence")
+                                .replace("{cost}", &forge_cost.to_string())
+                                .replace("{have}", &essence.to_string())
                         } else {
-                            format!("forge {} copies + {forge_cost} essence → 1 T{}", FORGE_COUNT, t.tier + 1)
+                            locale.tr_key("stash.forge_ready_tooltip")
+                                .replace("{n}", &FORGE_COUNT.to_string())
+                                .replace("{cost}", &forge_cost.to_string())
+                                .replace("{tier}", &(t.tier + 1).to_string())
                         };
                         html! {
                             <button class="stash-forge" disabled={forge_disabled}
                                     onclick={mk_forge(catalog_id)} title={title}>
-                                { format!("forge {forge_cost}e") }
+                                { locale.tr_key("stash.forge")
+                                    .replace("{cost}", &forge_cost.to_string()) }
                             </button>
                         }
                     } else {

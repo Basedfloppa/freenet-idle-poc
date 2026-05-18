@@ -9,6 +9,13 @@ REM Captures each instance_id / code_hash / delegate_key and writes
 REM them all into frontend\dev-keys.json. Trunk's copy-file directive
 REM picks the file up, the watcher triggers a hot-reload of the tab.
 REM
+REM NOTE: this Windows variant does NOT run the lockfile-isolation
+REM byte-equality gates that the .sh counterpart wires in (relies on
+REM bash + cmp + sha256sum). If you publish from Windows, run the gates
+REM manually in WSL or another Linux env before pushing: see
+REM scripts\check-delegate-byte-equal.sh and check-contract-byte-equal.sh,
+REM plus docs\delegate-stability.md for the discipline.
+REM
 REM Env overrides:
 REM   FDEV  -- path to the fdev binary (default: locally-built debug)
 REM   WS    -- ws URL of the local node (default: ws://127.0.0.1:7509)

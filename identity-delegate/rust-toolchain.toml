@@ -1,0 +1,12 @@
+[toolchain]
+# Pinned: identity_delegate.wasm bytes — and therefore the delegate's
+# `code_hash` — are sensitive to rustc/LLVM version. A stable-channel
+# bump rotates the bytes and re-namespaces `SecretsStore` writes, which
+# would strand every player's inventory.
+#
+# Bumping this pin is a deliberate act paired with a refreshed
+# `published-delegate/` snapshot and a release-notes mention.
+# See docs/delegate-stability.md for the discipline.
+channel = "1.93.0"
+targets = ["wasm32-unknown-unknown"]
+components = ["rustfmt", "clippy"]

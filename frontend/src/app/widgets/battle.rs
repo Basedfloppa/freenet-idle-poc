@@ -6,16 +6,22 @@ use yew::prelude::*;
 
 use crate::app::i18n::{Locale, MessageId};
 use crate::app::i18n_shared;
+use crate::app::prefs::UserPrefs;
 
 /// Live battle stage — combatant cards with HP bars. Replaces the
 /// static-emoji stage when a battle is in flight; the action row
 /// (Run Mission / auto) is rendered separately by the caller so it
 /// stays visible both idle and mid-fight.
+///
+/// `prefs` drives several display-only knobs (§8 C5 hero skin,
+/// D5 numerical-assist bits) — passed in so the widget can honour
+/// them without reaching back into `Core`.
 pub fn render_battle_stage(
     locale: Locale,
     battle: &shared::BattleState,
     inv: &Inventory,
     player_max_hp: u64,
+    prefs: &UserPrefs,
 ) -> Html {
     let enemy_def = shared::enemy_def(battle.enemy_id);
     let enemy_name = enemy_def.map(|e| i18n_shared::enemy_name(locale, e)).unwrap_or("?");
@@ -30,17 +36,35 @@ pub fn render_battle_stage(
     } else {
         (inv.current_hp * 100 / player_max_hp).min(100)
     };
+    // §8 C5 hero skin: empty string falls back to per-form emoji.
+    let hero_sprite_str = if !prefs.hero_skin.is_empty() {
+        prefs.hero_skin.clone()
+    } else {
+        form_sprite(inv.current_form).to_string()
+    };
+    // §8 D5 numerical assists:
+    //   bit 0 = show enemy HP as % (not raw)
+    //   bit 1 = hide hero HP numbers (bar only)
+    let assist = prefs.numerical_assists;
+    let enemy_hp_text = if (assist & 0b001) != 0 {
+        format!("{}%", enemy_pct)
+    } else {
+        format!("{} / {}", format_si(battle.enemy_hp), format_si(battle.enemy_max_hp))
+    };
+    let hero_hp_text = if (assist & 0b010) != 0 {
+        String::new()
+    } else {
+        format!("{} / {}", format_si(inv.current_hp), format_si(player_max_hp))
+    };
     html! {
         <div class="battle-stage">
             <div class="combatant hero">
-                <div class="combatant-sprite">{ form_sprite(inv.current_form) }</div>
+                <div class="combatant-sprite">{ hero_sprite_str }</div>
                 <div class="combatant-name">{ locale.tr(MessageId::TermYouBattle) }</div>
                 <div class="hp-bar">
                     <div class="hp-fill" style={format!("width: {player_pct}%")}></div>
                 </div>
-                <div class="combatant-hp muted small">
-                    { format!("{} / {}", format_si(inv.current_hp), format_si(player_max_hp)) }
-                </div>
+                <div class="combatant-hp muted small">{ hero_hp_text }</div>
             </div>
             <div class="combatant-vs">{ "⚔" }</div>
             <div class="combatant enemy">
@@ -49,9 +73,7 @@ pub fn render_battle_stage(
                 <div class="hp-bar">
                     <div class="hp-fill" style={format!("width: {enemy_pct}%")}></div>
                 </div>
-                <div class="combatant-hp muted small">
-                    { format!("{} / {}", format_si(battle.enemy_hp), format_si(battle.enemy_max_hp)) }
-                </div>
+                <div class="combatant-hp muted small">{ enemy_hp_text }</div>
             </div>
         </div>
     }
@@ -66,12 +88,14 @@ pub fn render_battle_queue(
     locale: Locale,
     battle: &shared::BattleState,
     _inv: &Inventory,
+    prefs: &UserPrefs,
 ) -> Html {
     let queued = match battle.queued_action {
         shared::BATTLE_ACTION_POTION => Some(locale.tr(MessageId::BattlePotionQueued)),
         shared::BATTLE_ACTION_FIREBALL => Some(locale.tr(MessageId::BattleFireballQueued)),
         _ => None,
     };
+    let hide_dmg = (prefs.numerical_assists & 0b100) != 0;
     html! { <>
         <p class="muted small">
             { locale.fmt_encounter_progress(
@@ -87,11 +111,25 @@ pub fn render_battle_queue(
         <p class="muted small battle-queued-slot">
             { queued.unwrap_or("\u{00a0}") }
         </p>
-        { render_battle_turns(locale, &battle.recent_turns) }
+        {
+            // §8 D5 bit 2 — full damage-numbers suppression.
+            // Without the per-turn magnitudes the recent-turns
+            // ticker collapses to a row of em-dashes, which is
+            // pure noise. Skip the ticker entirely.
+            if hide_dmg {
+                html! {}
+            } else {
+                render_battle_turns(locale, &battle.recent_turns, prefs)
+            }
+        }
     </>}
 }
 
-pub fn render_battle_turns(locale: Locale, turns: &[shared::BattleTurn]) -> Html {
+pub fn render_battle_turns(
+    locale: Locale,
+    turns: &[shared::BattleTurn],
+    prefs: &UserPrefs,
+) -> Html {
     // Always render the <ul> so the panel keeps a stable DOM
     // shape — paired with `min-height` on `ul.battle-turns` this
     // stops the page reflowing as turns 0 → 5 land. The empty-
@@ -106,15 +144,37 @@ pub fn render_battle_turns(locale: Locale, turns: &[shared::BattleTurn]) -> Html
             </ul>
         };
     }
+    // §8 D5 bit 2: hide damage info entirely in combat feed.
+    // Suppress the attack-swing lines AND the item-use magnitude;
+    // only keep neutral lines like "potion used" or "missed".
+    let hide_dmg = (prefs.numerical_assists & 0b100) != 0;
     html! {
         <ul class="battle-turns">
             { for turns.iter().rev().take(5).map(|t| {
                 let mut bits: Vec<String> = Vec::new();
                 if t.action == shared::BATTLE_ACTION_POTION { bits.push(locale.tr(MessageId::ItemPotion).to_lowercase()); }
-                if t.action == shared::BATTLE_ACTION_FIREBALL { bits.push(format!("{} +{}", locale.tr(MessageId::ItemFireball).to_lowercase(), format_si(shared::FIREBALL_BOSS_DAMAGE))); }
-                if t.player_dmg > 0 { bits.push(format!("{} → -{}", locale.tr(MessageId::TermYouBattle), format_si(t.player_dmg as u64))); }
-                if t.enemy_dmg > 0 { bits.push(format!("{} → -{}", locale_enemy(locale), format_si(t.enemy_dmg as u64))); }
-                if bits.is_empty() { bits.push(locale.tr(MessageId::BattleMissed).into()); }
+                if t.action == shared::BATTLE_ACTION_FIREBALL {
+                    bits.push(if hide_dmg {
+                        locale.tr(MessageId::ItemFireball).to_lowercase()
+                    } else {
+                        format!("{} +{}", locale.tr(MessageId::ItemFireball).to_lowercase(), format_si(shared::FIREBALL_BOSS_DAMAGE))
+                    });
+                }
+                if !hide_dmg {
+                    if t.player_dmg > 0 {
+                        bits.push(format!("{} → -{}", locale.tr(MessageId::TermYouBattle), format_si(t.player_dmg as u64)));
+                    }
+                    if t.enemy_dmg > 0 {
+                        bits.push(format!("{} → -{}", locale_enemy(locale), format_si(t.enemy_dmg as u64)));
+                    }
+                }
+                if bits.is_empty() {
+                    // hide_dmg + no consumable action = a silent
+                    // swing turn. Render as an em-dash spacer so
+                    // the panel still shows turn cadence without
+                    // exposing magnitudes.
+                    bits.push(if hide_dmg { "—".to_string() } else { locale.tr(MessageId::BattleMissed).into() });
+                }
                 html! { <li class="battle-turn-row">{ bits.join(" · ") }</li> }
             }) }
         </ul>

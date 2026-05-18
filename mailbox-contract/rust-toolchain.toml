@@ -1,0 +1,8 @@
+[toolchain]
+# Pinned (Approach A — see docs/delegate-stability.md). A
+# stable-channel bump rotates contract WASM bytes; a fresh
+# `code_hash` mints a NEW `mailbox-contract` instance and orphans
+# every existing signed-message log.
+channel = "1.93.0"
+targets = ["wasm32-unknown-unknown"]
+components = ["rustfmt", "clippy"]

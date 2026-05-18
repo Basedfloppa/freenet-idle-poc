@@ -38,7 +38,9 @@ pub fn buy_estate_worker(
     tick_estate(&mut inv, now_ms);
     let tier = estate_tier(tier_id).ok_or_else(|| format!("unknown estate tier {tier_id}"))?;
     let owned = inv.estate.workers_of(tier_id);
-    let price = estate_next_price(tier, owned);
+    // Insight EstateFrugality node applies a per-worker discount.
+    let discount_bp = inv.insight.frugality_mult_bp();
+    let price = shared::estate_next_price_with_discount(tier, owned, discount_bp);
     if inv.base.base.gold < price {
         return Err(format!("not enough gold: need {price}, have {}", inv.base.base.gold));
     }
@@ -96,7 +98,17 @@ pub fn set_idle_action(
 /// Capped at `MAX_ESTATE_CATCHUP_SEC` of real time so the offline
 /// window can't crash the delegate's CPU budget.
 pub fn tick_estate(inv: &mut Inventory, now_ms: u64) {
-    if inv.idle_action != IDLE_ACTION_ESTATE || inv.estate.last_tick_ms == 0 {
+    // §⚠️#2 (2026-05-18): Estate yields run concurrent with combat /
+    // activity for every player. The WorkforceBoss token perk was
+    // previously the only path to parallel Estate yield — gating
+    // most players to a mutex with combat made the perk feel
+    // mandatory and the Estate panel ignored. Now both states tick
+    // Estate unconditionally; WorkforceBoss is retained as a
+    // historical token slot (read by `estate_parallel()` but no
+    // longer load-bearing here). Bookkeeping still requires
+    // `last_tick_ms` to be initialised so a brand-new player who's
+    // never visited the Estate doesn't accrue retroactive yield.
+    if inv.estate.last_tick_ms == 0 {
         return;
     }
     if now_ms <= inv.estate.last_tick_ms {

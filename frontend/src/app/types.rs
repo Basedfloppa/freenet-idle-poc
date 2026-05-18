@@ -2,13 +2,13 @@
 //! no behaviour besides the trivial constructors.
 
 /// Top-level UI section. Each variant maps to one tab button + one
-/// content view; switching tabs hides every other view. The Farm tab
+/// content view; switching tabs hides every other view. The Home tab
 /// is the default — it's the main play surface (hero, mission scene,
 /// equipment, plot, boss HP, resources). Other tabs are auxiliary
 /// tools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
-    Farm,
+    Home,
     WorldMap,
     Shop,
     Guilds,
@@ -43,6 +43,15 @@ pub enum ToggleField {
     ReactivePublish,
     HidePubkey,
     HideStale,
+    // §8 Tier C/D customization toggles. All frontend-only —
+    // they live in `UserPrefs` and never round-trip to the
+    // delegate (display affects only the current browser).
+    HideGold,
+    HideBossDamage,
+    ReducedMotion,
+    ReducedFlash,
+    OverlayMode,
+    KeyboardShortcuts,
 }
 
 /// One toast notification. Rendered as a corner banner; the
@@ -60,3 +69,30 @@ pub const TOAST_TTL_MS: u64 = 6_000;
 /// rather than letting the array grow unboundedly (e.g. if 20
 /// achievements unlock in one tick from a long offline catch-up).
 pub const MAX_TOASTS: usize = 8;
+
+/// Categories surfaced via the toast banner. Each variant maps to
+/// one bit in `UserPrefs.toast_filter` (§8 B5) — a 0 bit silently
+/// drops that category at push time so the player can mute
+/// noise without losing the rest. Discriminants are wire-stable
+/// because the bitmask is persisted in localStorage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ToastKind {
+    /// `🏆 ACHIEVEMENT NAME` — fires on every new
+    /// `achievement_unlocks` entry.
+    Achievement = 0,
+    /// `⬆ Level N` — fires on every crossing of `level_of(inv)`.
+    LevelUp = 1,
+    /// `🔁 Form: X` — fires on every `inv.current_form` change.
+    FormChange = 2,
+    /// `🧪 Potion used` — fires when a potion is consumed
+    /// outside combat (silent click feedback).
+    PotionIdle = 3,
+}
+
+impl ToastKind {
+    /// Bit in `UserPrefs.toast_filter` that gates this kind.
+    pub fn bit(self) -> u32 {
+        1u32 << (self as u8)
+    }
+}

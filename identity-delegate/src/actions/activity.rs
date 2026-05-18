@@ -92,7 +92,13 @@ pub fn tick_activity(inv: &mut Inventory, now_ms: u64) {
     if elapsed_sec > MAX_ACTIVITY_CATCHUP_SEC {
         elapsed_sec = MAX_ACTIVITY_CATCHUP_SEC;
     }
-    let yield_total = def.yield_per_sec.saturating_mul(elapsed_sec);
+    // Insight ActivityYield amplifies the per-second yield.
+    let yield_bp = inv.insight.activity_yield_bp();
+    let yield_total = def
+        .yield_per_sec
+        .saturating_mul(elapsed_sec)
+        .saturating_mul(yield_bp)
+        / 10_000;
     match def.produces {
         ActivityResource::Wheat => {
             inv.wheat = inv.wheat.saturating_add(yield_total);

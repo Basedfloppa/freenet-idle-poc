@@ -39,6 +39,61 @@ pub fn format_si(n: u64) -> String {
     n.to_string()
 }
 
+/// Pick a number format style. `Compact` is the legacy
+/// `format_si` shortening; `Full` groups thousands with commas;
+/// `Raw` is just the digits. Settings-A1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NumberFormat {
+    Compact,
+    Full,
+    Raw,
+}
+
+impl NumberFormat {
+    pub fn code(self) -> &'static str {
+        match self {
+            NumberFormat::Compact => "compact",
+            NumberFormat::Full => "full",
+            NumberFormat::Raw => "raw",
+        }
+    }
+    pub fn from_code(s: &str) -> Option<NumberFormat> {
+        match s {
+            "compact" => Some(NumberFormat::Compact),
+            "full" => Some(NumberFormat::Full),
+            "raw" => Some(NumberFormat::Raw),
+            _ => None,
+        }
+    }
+}
+
+/// Group thousands with `,` for `Full` style. Returns digits-only
+/// for `Raw`.
+fn format_grouped(n: u64) -> String {
+    let s = n.to_string();
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, b) in bytes.iter().enumerate() {
+        let from_end = bytes.len() - i;
+        if i > 0 && from_end % 3 == 0 {
+            out.push(',');
+        }
+        out.push(*b as char);
+    }
+    out
+}
+
+/// Style-aware wrapper. Callers that want `Settings.number_format`
+/// to honour the user choice use this; legacy paths that always
+/// want the compact form keep using [`format_si`] directly.
+pub fn format_with_style(n: u64, style: NumberFormat) -> String {
+    match style {
+        NumberFormat::Compact => format_si(n),
+        NumberFormat::Full => format_grouped(n),
+        NumberFormat::Raw => n.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

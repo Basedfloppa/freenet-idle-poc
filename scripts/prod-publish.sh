@@ -265,6 +265,38 @@ build_and_publish_contract() {
     # contract instance is orphaned when a new instance is created.
     local allow_var="${9:-}"
 
+    # Approach A — byte-equality gate. Verify the rebuilt WASM still
+    # matches `published-contract/<short>/` before fdev touches it.
+    # Drift here = a workspace dep or =x.y.z pin bump leaked through,
+    # and a publish would rotate `contract_id` and orphan state. The
+    # operator override is the same `$allow_var` already used by the
+    # on-chain code_hash diff gate below: drift + override → warning
+    # + continue; drift + no override → hard stop.
+    case "$crate" in
+        presence-contract|mailbox-contract|guilds-contract)
+            local short="${crate%-contract}"
+            echo "[prod-publish] checking $short byte-equality against published-contract/"
+            if ! "$HERE/scripts/check-contract-byte-equal.sh" "$short"; then
+                local allow_val=0
+                if [[ -n "$allow_var" ]]; then
+                    allow_val="${!allow_var:-0}"
+                fi
+                if [[ "$allow_val" == "1" ]]; then
+                    echo "[prod-publish] $allow_var=1 — drift accepted; continuing"
+                    echo "[prod-publish]   remember to refresh published-contract/$short/ post-publish"
+                else
+                    echo "[prod-publish] REFUSING to build $label: WASM drifted from snapshot."
+                    echo "[prod-publish] See published-contract/README.md to regenerate the"
+                    echo "[prod-publish] snapshot deliberately, OR re-run with"
+                    [[ -n "$allow_var" ]] && echo "[prod-publish]   $allow_var=1"
+                    echo "[prod-publish] if a fresh contract is what you want (state for the"
+                    echo "[prod-publish] previous instance will be orphaned)."
+                    exit 1
+                fi
+            fi
+            ;;
+    esac
+
     echo "[prod-publish] building $label"
     cd "$HERE/$crate"
 
@@ -361,6 +393,30 @@ if [[ "$STAGE_DELEGATE" != "1" ]]; then
         exit 1
     fi
 else
+    # Approach A — byte-equality gate. Before we touch fdev, verify the
+    # rebuilt delegate WASM still matches `published-delegate/`. Drift
+    # here = a workspace dep or =x.y.z pin bump leaked through, and a
+    # publish would rotate `code_hash` and strand every player's
+    # inventory. ALLOW_DELEGATE_REPUBLISH=1 already exists as the
+    # operator override for an intentional rotation, so we wire the
+    # same flag here: drift + override → continue with a warning;
+    # drift + no override → hard stop.
+    echo "[prod-publish] checking delegate byte-equality against published-delegate/"
+    if ! "$HERE/scripts/check-delegate-byte-equal.sh"; then
+        if [[ "$ALLOW_DELEGATE_REPUBLISH" == "1" ]]; then
+            echo "[prod-publish] ALLOW_DELEGATE_REPUBLISH=1 — drift accepted; continuing"
+            echo "[prod-publish]   remember to refresh published-delegate/ post-publish"
+        else
+            echo "[prod-publish] REFUSING to build delegate: WASM drifted from snapshot."
+            echo "[prod-publish] See published-delegate/README.md to regenerate the"
+            echo "[prod-publish] snapshot deliberately, OR re-run with"
+            echo "[prod-publish]   ALLOW_DELEGATE_REPUBLISH=1"
+            echo "[prod-publish] if a fresh delegate is what you want (player saves"
+            echo "[prod-publish] will be wiped — same loss surface as the on-chain gate)."
+            exit 1
+        fi
+    fi
+
     echo "[prod-publish] building identity-delegate"
     cd "$HERE/identity-delegate"
 

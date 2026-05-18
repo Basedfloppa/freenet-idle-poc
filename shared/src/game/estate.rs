@@ -93,8 +93,18 @@ pub fn estate_tier(id: u8) -> Option<&'static EstateTierDef> {
 /// owned. Pure function — used by buy validation and by the
 /// frontend's "next price" label.
 pub fn estate_next_price(tier: &EstateTierDef, owned: u64) -> u64 {
-    // `base_cost * (1.07)^owned` via repeated multiplication in
-    // basis points. Caps at u64::MAX on overflow rather than wrapping.
+    estate_next_price_with_discount(tier, owned, 10_000)
+}
+
+/// Same as [`estate_next_price`] but applies a basis-point
+/// multiplier at the end (Insight EstateFrugality node uses this).
+/// `discount_bp = 10_000` = neutral; `9_000` = −10%; capped from
+/// below by 1 so the price never disappears.
+pub fn estate_next_price_with_discount(
+    tier: &EstateTierDef,
+    owned: u64,
+    discount_bp: u64,
+) -> u64 {
     let mut price = tier.base_cost;
     let mut n = owned;
     while n > 0 {
@@ -104,7 +114,8 @@ pub fn estate_next_price(tier: &EstateTierDef, owned: u64) -> u64 {
             break;
         }
     }
-    price
+    let discounted = price.saturating_mul(discount_bp) / 10_000;
+    discounted.max(1)
 }
 
 /// Form-affinity table (backlog B3). Multiplier in basis points
@@ -162,11 +173,20 @@ pub fn form_affinity_bp(form: u8, tier_id: u8) -> u64 {
     }
 }
 
-/// Persistent estate state. Lives inside `InventoryV12` and
+/// Frozen V1 shape of `EstateState`. Lives inside `InventoryV12` and
 /// participates in the additive-composition pattern documented on
 /// `InventoryV11`.
+///
+/// **Wire-format rule:** do NOT add fields here. bincode 1 does not
+/// apply `#[serde(default)]` to truncated input, so extending this
+/// struct in place would break every blob that doesn't already have
+/// the new field. When the design needs more fields, snapshot this
+/// shape as the frozen V1, define `EstateStateV2 { base: V1, … }`,
+/// and ship V2 inside a fresh `InventoryV(N+1)`. The same pattern
+/// is used by `RoutineStateV1`/`V2` — see `routine.rs` for the
+/// canonical example.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct EstateState {
+pub struct EstateStateV1 {
     /// Worker counts keyed by `tier.id`. Missing key ≡ 0.
     pub workers: BTreeMap<u8, u64>,
     /// Wall-clock of the last tick that paid out yield. Updated by
@@ -174,7 +194,7 @@ pub struct EstateState {
     pub last_tick_ms: u64,
 }
 
-impl EstateState {
+impl EstateStateV1 {
     pub fn workers_of(&self, tier_id: u8) -> u64 {
         self.workers.get(&tier_id).copied().unwrap_or(0)
     }
@@ -184,6 +204,10 @@ impl EstateState {
         *n = n.saturating_add(1);
     }
 }
+
+/// Public alias. Consumer code reads/writes `EstateState`; the V1
+/// freeze is only relevant when extending the schema (see above).
+pub type EstateState = EstateStateV1;
 
 /// Single-active-action selector (§5.6). When this is `Estate` the
 /// delegate ticks worker yield and the auto-mission loop is gated

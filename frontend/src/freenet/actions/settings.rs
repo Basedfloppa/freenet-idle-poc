@@ -60,6 +60,21 @@ pub struct Settings {
     /// is null-origin — without this field the picker resets to 0
     /// after every reload.
     pub auto_pause_hp_pct: Option<u8>,
+    /// Number-format preference: `"compact"` (default — engineering
+    /// suffix), `"full"` (comma-grouped), `"raw"` (digits only).
+    pub number_format: Option<String>,
+    /// Body font-size scale in percent (50..=200). `None` =
+    /// browser default (100%).
+    pub font_scale: Option<u8>,
+    /// Spoiler-safe mode — when `true`, frontend hides plot /
+    /// chapter / endings text so streamers / first-time players
+    /// can show their session without spoiling story beats.
+    pub spoiler_safe: Option<bool>,
+    /// Confirm-before-destructive — when `true`, frontend wraps
+    /// Ascend / form-change / sell-all in an extra confirm
+    /// dialog. Already true for Reset Progress and Reveal Seed by
+    /// default.
+    pub confirm_destructive: Option<bool>,
 }
 
 /// Load the delegate-persisted settings blob and mirror its fields
@@ -168,6 +183,13 @@ pub fn save_settings_once(
             .unwrap_or_else(|| Some(c.last_catchup_acked_started_ms));
         let auto_pause_hp_pct = auto_pause_hp_pct_override
             .or(Some(c.prefs.auto_pause_hp_pct));
+        // §8 customization (A1/A2/A5/A8). All mirror the current
+        // UserPrefs snapshot — overrides come through the same
+        // save_settings_once entry; no separate RPC.
+        let number_format = Some(c.prefs.number_format.clone());
+        let font_scale = Some(c.prefs.font_scale);
+        let spoiler_safe = Some(c.prefs.spoiler_safe);
+        let confirm_destructive = Some(c.prefs.confirm_destructive);
         let settings = Settings {
             display_name,
             theme,
@@ -176,6 +198,10 @@ pub fn save_settings_once(
             last_seen_version,
             last_catchup_acked_started_ms,
             auto_pause_hp_pct,
+            number_format,
+            font_scale,
+            spoiler_safe,
+            confirm_destructive,
         };
         let payload = match serde_json::to_vec(&settings) {
             Ok(b) => b,
@@ -226,7 +252,7 @@ fn apply_settings(c: &mut crate::app::Core, settings: Settings) {
         }
     }
     if let Some(theme) = settings.theme {
-        if crate::app::prefs::THEMES.iter().any(|(id, _)| *id == theme) {
+        if crate::app::prefs::theme_is_known(&theme) {
             c.current_theme = theme.clone();
             crate::app::prefs::apply_theme(&theme);
         }
@@ -248,6 +274,26 @@ fn apply_settings(c: &mut crate::app::Core, settings: Settings) {
     }
     if let Some(pct) = settings.auto_pause_hp_pct {
         c.prefs.auto_pause_hp_pct = pct;
+        save_prefs(&c.prefs);
+    }
+    if let Some(fmt) = settings.number_format {
+        if shared::NumberFormat::from_code(&fmt).is_some() {
+            c.prefs.number_format = fmt;
+            save_prefs(&c.prefs);
+        }
+    }
+    if let Some(scale) = settings.font_scale {
+        let clamped = scale.clamp(50, 200);
+        c.prefs.font_scale = clamped;
+        crate::app::prefs::apply_font_scale(clamped);
+        save_prefs(&c.prefs);
+    }
+    if let Some(v) = settings.spoiler_safe {
+        c.prefs.spoiler_safe = v;
+        save_prefs(&c.prefs);
+    }
+    if let Some(v) = settings.confirm_destructive {
+        c.prefs.confirm_destructive = v;
         save_prefs(&c.prefs);
     }
 }

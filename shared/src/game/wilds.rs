@@ -15,7 +15,48 @@
 use super::AreaDef;
 
 pub const WILDS_AREA_BASE: u8 = 100;
-pub const WILDS_NODE_COUNT: u8 = 8;
+pub const WILDS_NODE_COUNT: u8 = 12;
+
+/// First-clear landmark reward associated with a specific Wilds
+/// node. The watermark of which areas have been claimed lives in
+/// `Inventory.landmark_claims` (per-area first-clear timestamp).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WildsLandmark {
+    /// One-shot bundle of essence (the value is the amount).
+    EssencePool(u64),
+    /// A gear-cache drop: tier 1..=3 piece for a random allowed
+    /// slot (rolled by the existing `shop_roll_catalog_id`).
+    GearCache(u8),
+    /// Hidden form scroll — unlocks the named form's slot and adds
+    /// it to `forms_visited` immediately.
+    HiddenFormScroll(u8),
+    /// Bag of tokens (the value is the count).
+    TokenBag(u64),
+    /// Pool of insight currency.
+    InsightTrove(u64),
+}
+
+/// Static map of (area_id within the Wilds namespace) → landmark.
+/// Independent of the player's seed — every Wilds run has the
+/// same landmark layout, only the procedural NAMES differ via
+/// the existing seeded RNG. This keeps the design space small
+/// enough to balance globally.
+pub fn wilds_landmark(area_id: u8) -> Option<WildsLandmark> {
+    if area_id < WILDS_AREA_BASE {
+        return None;
+    }
+    match area_id {
+        // 100/101/102 — entrance + branch trees, no landmark
+        103 => Some(WildsLandmark::EssencePool(150)),
+        105 => Some(WildsLandmark::GearCache(2)),
+        107 => Some(WildsLandmark::HiddenFormScroll(super::forms::FORM_DRAGON)),
+        108 => Some(WildsLandmark::TokenBag(2)),
+        109 => Some(WildsLandmark::InsightTrove(40)),
+        110 => Some(WildsLandmark::GearCache(3)),
+        111 => Some(WildsLandmark::HiddenFormScroll(super::forms::FORM_HORSE)),
+        _ => None,
+    }
+}
 
 /// Build the Wilds DAG for the given seed. The shape is fixed —
 /// only the names + enemy stat noise come from the RNG — so all
@@ -40,13 +81,21 @@ pub fn wilds_areas(seed: u32) -> Vec<AreaDef> {
     // deterministic and stable across builds.
     let mut rng = WildsRng::new(seed);
 
-    let templates: [(u8, &[u8], u64, u64, u64, u64, u64); 8] = [
+    let templates: [(u8, &[u8], u64, u64, u64, u64, u64); 12] = [
         // (id, preds, min_level, gold_mult, essence_mult, enemy_hp, enemy_atk)
         // Wilds entrance aligns with Boss's Lair (min_level 10) so a
         // player who finishes the linear chain can step straight in.
-        // Inner Wilds ramp up to lvl 45 — combined with the quadratic
+        // Inner Wilds ramp up to lvl 65 — combined with the quadratic
         // `scale_by_area_level` factor, the deep nodes stay tough for
         // end-game players carrying full Legacy/Insight/Token spend.
+        // 12-node layout (4 landmark slots: 103/105/107/108-111):
+        //   D0: 100             entrance
+        //   D1: 101, 102        branches
+        //   D2: 103, 104, 105   ★ 103 EssencePool, ★ 105 GearCache T2
+        //   D3: 106, 107        ★ 107 HiddenFormScroll(Dragon)
+        //   D4: 108, 109        ★ 108 TokenBag, ★ 109 InsightTrove
+        //   D5: 110             ★ GearCache T3
+        //   D6: 111             ★ HiddenFormScroll(Horse) — endgame
         (100, &[],          10,  8,  5,  180,  35),
         (101, &[100],       15, 10,  6,  220,  45),
         (102, &[100],       15,  6, 10,  220,  42),
@@ -55,17 +104,25 @@ pub fn wilds_areas(seed: u32) -> Vec<AreaDef> {
         (105, &[101, 102],  25, 14, 14,  340,  62),
         (106, &[103],       35, 16,  8,  420,  75),
         (107, &[104, 105],  45, 10, 16,  420,  72),
+        (108, &[106],       50, 18, 10,  520,  86),
+        (109, &[107],       55, 12, 20,  580,  90),
+        (110, &[108, 109],  60, 22, 18,  680, 102),
+        (111, &[110],       65, 16, 22,  780, 115),
     ];
     for &(id, preds, min_level, gm, em, ehp, eatk) in &templates {
         let name = wilds_name(id as u32, &mut rng);
         let blurb = wilds_blurb(name, id as u32);
-        // Slight enemy-stat jitter from seed (±15%) so the
-        // numbers feel unique per player even when topology is
-        // fixed. Within a single player's session the values
-        // stay constant — `rng` is rebuilt per call but always
-        // from the same seed.
+        // Slight enemy-stat jitter from seed (±10%) so numbers
+        // feel unique per player even with fixed topology, but
+        // the band is tight enough that an early-level enemy
+        // can't randomly spike to a one-shot bracket. Tightened
+        // from ±15% after the 2026-05-17 UX pass — Wilds
+        // entrance occasionally rolled +15% atk on a player just
+        // crossing level 10, killing them in two turns. ±10%
+        // keeps variance visible without losing the ability to
+        // plan around it.
         let mut jitter = |base: u64| -> u64 {
-            let drift = (rng.next() % 31) as i32 - 15; // [-15, +15]
+            let drift = (rng.next() % 21) as i32 - 10; // [-10, +10]
             let scaled = base as i64 * (100 + drift as i64) / 100;
             scaled.max(1) as u64
         };

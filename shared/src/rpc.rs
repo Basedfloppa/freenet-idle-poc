@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::freenet::{byte_array_32, byte_array_64, PubKey, PUBKEY_LEN, SIG_LEN};
+use crate::{byte_array_32, byte_array_64, PubKey, PUBKEY_LEN, SIG_LEN};
 use crate::game::Inventory;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,8 +64,6 @@ pub enum DelegateRequest {
     /// Combine `FORGE_COUNT` copies of the same catalog item +
     /// `forge_essence_cost(tier)` essence → next-tier same slot.
     ForgeUpgrade { catalog_id: u16, now_ms: u64 },
-    /// Work the farm — +1 wheat per call. Safe non-combat income.
-    WorkFarm { now_ms: u64 },
     /// Convert wheat to gold at `WHEAT_PER_GOLD : 1`. `amount=0`
     /// sells all owned wheat.
     SellWheat { amount: u64, now_ms: u64 },
@@ -194,6 +192,42 @@ pub enum DelegateRequest {
         target: u64,
         now_ms: u64,
     },
+    /// Set / clear a per-slot gear-tier auto-buy target.
+    /// `tier == 0` clears the target. `tier ∈ 1..=TIER_COUNT`.
+    SetRoutineGearTarget {
+        slot_idx: u8,
+        tier: u8,
+        now_ms: u64,
+    },
+    /// Set / clear a per-consumable stockpile target.
+    /// `kind ∈ {CONSUMABLE_POTION, CONSUMABLE_FIREBALL}`,
+    /// `target == 0` clears.
+    SetRoutineConsumableTarget {
+        kind: u8,
+        target: u32,
+        now_ms: u64,
+    },
+    /// Toggle auto-buy of priced skills when affordable.
+    SetRoutineAutoSkill {
+        enabled: bool,
+        now_ms: u64,
+    },
+    /// Set / clear preferred activity for `area_id`. When the
+    /// player is in that zone the routine pump flips
+    /// `idle_action = IDLE_ACTION_ACTIVITY` and starts the chosen
+    /// activity (if available).
+    SetRoutineActivityForZone {
+        area_id: u8,
+        activity_id: u8,
+        now_ms: u64,
+    },
+    /// Replace the AFK battle action policy. `Manual` is the
+    /// legacy zero-input mode; `Auto { … }` queues potion at HP
+    /// threshold + fireball every N turns.
+    SetRoutineBattlePolicy {
+        policy: crate::game::BattleActionPolicy,
+        now_ms: u64,
+    },
     /// Spend insight to level a node (B5). Refused if balance < cost.
     BuyInsightNode { node_id: u8, now_ms: u64 },
     /// Personal opt-in attack on the World Boss (C1). Costs
@@ -250,6 +284,66 @@ pub enum DelegateRequest {
         rank: u8,
         now_ms: u64,
     },
+    /// Convert `amount` essence into gold at the merchant
+    /// (`ESSENCE_TO_GOLD_RATE` gold per essence). `amount = 0`
+    /// converts the whole essence balance. Post-Ascend players
+    /// pile up essence with nowhere to spend it; this opens a
+    /// way back to gold without trivialising the combat economy
+    /// (the rate is intentionally inferior to grinding Boss
+    /// areas for raw gold).
+    ConvertEssenceToGold { amount: u64, now_ms: u64 },
+    /// One-click preset: set `routine.gear_targets[slot]` to the
+    /// currently-equipped tier for every form-allowed slot that
+    /// has gear in it. Slots without an equipped piece keep
+    /// whatever target was previously configured. Wire up the
+    /// pump-driver auto-equip on drop without making the player
+    /// click 8 per-slot buttons.
+    LockRoutineGearTargetsToEquipped { now_ms: u64 },
+    /// Toggle the global `auto_equip_best_on_drop` switch. When
+    /// ON, the routine pump auto-equips the best stash piece for
+    /// every form-allowed slot on every state mutation — no
+    /// per-slot tier targets required. Pure-shuffle: never buys
+    /// from the shop.
+    SetRoutineAutoEquipBest { enabled: bool, now_ms: u64 },
+    /// §8 B6: per-player offline-cap. `hours = 0` resets to the
+    /// 1-hour legacy default; otherwise clamped to 24 h
+    /// server-side. Controls how much wall-clock idle time the
+    /// auto-mission catchup loop simulates in one call.
+    SetRoutineOfflineCapHours { hours: u8, now_ms: u64 },
+    /// §8 B7: auto-mission area cycle config. `mode` is one of
+    /// `MISSION_CYCLE_*` constants in `shared::routine`;
+    /// `areas` is the ordered list of area ids to rotate through
+    /// (ignored if `mode == STATIC`).
+    SetRoutineMissionCycle {
+        mode: u8,
+        areas: Vec<u8>,
+        now_ms: u64,
+    },
+    /// §8 D6: combat-speed multiplier in basis points. `0` =
+    /// legacy default (10_000 = 1×). Clamped to 30_000 (3×)
+    /// server-side.
+    SetRoutineCombatSpeed { mult_bp: u32, now_ms: u64 },
+    /// §E-tier: public cosmetic prefs published into the
+    /// PresencePayloadV3 heartbeat. Empty motto / 0 accent / 0
+    /// frame = don't publish. All values clamped server-side.
+    SetPublicCosmetics {
+        motto: String,
+        accent: u8,
+        frame: u8,
+        now_ms: u64,
+    },
+    /// §P3: daily check-in. Awards essence based on the current
+    /// streak length; bumps the streak when called on a new UTC
+    /// day (rolls to 1 if a day was missed). Idempotent within a
+    /// single UTC day — second call on the same day is a no-op.
+    ClaimDailyCheckin { now_ms: u64 },
+    /// Bulk-buy a Legacy node. `count == 0` = "buy as many as
+    /// stars allow", capped at 100 server-side. Atomic: at least
+    /// one level must be affordable or the call fails.
+    BuyLegacyNodeBulk { node_id: u8, count: u32, now_ms: u64 },
+    /// Bulk-buy an Insight node. Same semantics as
+    /// `BuyLegacyNodeBulk`.
+    BuyInsightNodeBulk { node_id: u8, count: u32, now_ms: u64 },
 }
 
 /// Domain split for blob-encoded persisted state. Each variant maps

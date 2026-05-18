@@ -12,6 +12,7 @@ pub mod keys;
 pub mod prefs;
 pub mod render;
 pub mod tabs;
+pub mod theme_loader;
 pub mod types;
 pub mod util;
 pub mod widgets;

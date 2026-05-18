@@ -1,7 +1,10 @@
 //! World-map area card. Three visual states (`current`,
 //! `unlocked`, `locked`) drive the disabled/highlight semantics.
 
-use shared::{area_predecessor_progress, AreaDef, Inventory, MISSION_DAMAGE, MISSION_ESSENCE, MISSION_GOLD};
+use shared::{
+    area_predecessor_progress, enemy_def, enemy_roster_for_area, scale_by_area_level, AreaDef,
+    Inventory, ENCOUNTERS_PER_MISSION, MISSION_DAMAGE, MISSION_ESSENCE, MISSION_GOLD,
+};
 use yew::prelude::*;
 
 use crate::app::i18n::{Locale, MessageId};
@@ -67,6 +70,26 @@ where
         let gold = MISSION_GOLD.saturating_mul(area.gold_mult);
         let ess = MISSION_ESSENCE.saturating_mul(area.essence_mult);
         let dmg = MISSION_DAMAGE.saturating_mul(area.damage_mult);
+        // Estimated XP/mission: roster's average per-encounter
+        // reward scaled by area level, times the mission's
+        // encounter count. Rough — actual swing depends on which
+        // roster entries roll up — but accurate enough to give the
+        // player a meaningful "is this area worth grinding"
+        // signal vs the prior step.
+        let xp_estimate = {
+            let roster = enemy_roster_for_area(area.id);
+            if roster.is_empty() {
+                0
+            } else {
+                let total: u64 = roster
+                    .iter()
+                    .filter_map(|id| enemy_def(*id))
+                    .map(|e| scale_by_area_level(e.xp_reward, area.min_level))
+                    .sum();
+                let avg = total / roster.len() as u64;
+                avg.saturating_mul(ENCOUNTERS_PER_MISSION as u64)
+            }
+        };
         let dmg_badge = if dmg > 0 {
             html! { <span title="boss damage per mission">{ format!("{dmg}d") }</span> }
         } else {
@@ -81,6 +104,9 @@ where
             <span class="area-rewards">
                 <span title="gold per mission">{ format!("{gold}g") }</span>
                 <span title="essence per mission">{ format!("{ess}e") }</span>
+                <span title="estimated XP per mission (avg of roster, scaled by area level)">
+                    { format!("{xp_estimate}xp") }
+                </span>
                 { dmg_badge }
                 <span class="muted" title="encounter clears here">
                     { locale.fmt_cleared_count(own_clears) }

@@ -14,7 +14,7 @@ use freenet_stdlib::prelude::*;
 use shared::{
     ContractDelta, ContractState, ContractSummary, CONTRACT_STATE_VERSION, MAX_AREA_BYTES,
     MAX_CUMULATIVE_KEYS, MAX_LIVE_ENTRIES, MAX_NAME_BYTES, MAX_PAYLOAD_BYTES, MAX_STALE_MS,
-    MAX_TIMESTAMP_MS, PRESENCE_PAYLOAD_VERSION,
+    MAX_TIMESTAMP_MS, ACCEPTED_PAYLOAD_VERSIONS,
 };
 
 struct Presence;
@@ -57,7 +57,7 @@ impl ContractInterface for Presence {
                 // injection, not the apply path. Treat as invalid.
                 Err(_) => return Ok(ValidateResult::Invalid),
             };
-            if payload.version != PRESENCE_PAYLOAD_VERSION {
+            if !ACCEPTED_PAYLOAD_VERSIONS.contains(&payload.version) {
                 return Ok(ValidateResult::Invalid);
             }
             if &payload.public_key != pk {

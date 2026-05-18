@@ -94,10 +94,11 @@ pub fn max_hp_from(inv: &Inventory) -> u64 {
         .insight
         .node_level(shared::InsightNode::HpPerLevel)
         .saturating_mul(lvl);
-    20u64
+    let raw = 20u64
         .saturating_add(lvl.saturating_mul(5))
         .saturating_add(hp_bonus)
-        .saturating_add(insight_hp)
+        .saturating_add(insight_hp);
+    raw.saturating_mul(inv.tokens.max_hp_mult_bp()) / 10_000
 }
 
 pub fn attack_from(inv: &Inventory) -> u64 {

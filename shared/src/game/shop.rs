@@ -60,6 +60,14 @@ pub fn shop_roll_catalog_id(slot: u8, tier: u8, _counter: u64) -> Option<u16> {
 
 pub const WHEAT_PER_GOLD: u64 = 10;
 
+/// Essence-to-gold conversion at the merchant. 1 essence → N gold.
+/// Sized so a post-Ascend essence pile (~10k after the first
+/// Ascend) maps to a couple of T3 gear sets but is still inferior
+/// to grinding Boss areas for raw gold — the merchant exists to
+/// give essence-rich / gold-poor players a way out of the slump,
+/// not to make essence the dominant economy.
+pub const ESSENCE_TO_GOLD_RATE: u64 = 5;
+
 /// Gold cost of a shop-bought form change. Returns `None` for the
 /// catch-all "unknown form" case so the delegate can reject the
 /// purchase. Human is intentionally the cheapest — it's the

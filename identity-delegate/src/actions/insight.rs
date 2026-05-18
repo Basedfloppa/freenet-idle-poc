@@ -31,22 +31,39 @@ pub fn buy_insight_node(
     node_id: u8,
     now_ms: u64,
 ) -> Result<Inventory, String> {
+    buy_insight_node_n(ctx, node_id, 1, now_ms)
+}
+
+/// Bulk-buy variant. `count == 0` = "buy as many as insight
+/// allows" (capped at 100). Same all-or-something semantics as
+/// `buy_legacy_node_n`: if zero levels are affordable, fail.
+pub fn buy_insight_node_n(
+    ctx: &mut DelegateCtx,
+    node_id: u8,
+    count: u32,
+    now_ms: u64,
+) -> Result<Inventory, String> {
     let mut inv = load_inventory_raw(ctx);
     enter_action(&mut inv, now_ms)?;
     let node = InsightNode::from_id(node_id)
         .ok_or_else(|| format!("unknown insight node {node_id}"))?;
     award_pending_insight(&mut inv);
-    let current_level = inv.insight.node_level(node);
-    let cost = node.next_cost(current_level);
-    if inv.insight.balance < cost {
-        return Err(format!(
-            "need {cost} insight, have {}",
-            inv.insight.balance
-        ));
+    let cap: u32 = if count == 0 { 100 } else { count.min(100) };
+    let mut bought = 0u32;
+    while bought < cap {
+        let current_level = inv.insight.node_level(node);
+        let cost = node.next_cost(current_level);
+        if inv.insight.balance < cost {
+            break;
+        }
+        inv.insight.balance -= cost;
+        let entry = inv.insight.nodes.entry(node.id()).or_insert(0);
+        *entry = entry.saturating_add(1);
+        bought += 1;
     }
-    inv.insight.balance -= cost;
-    let entry = inv.insight.nodes.entry(node.id()).or_insert(0);
-    *entry = entry.saturating_add(1);
+    if bought == 0 {
+        return Err("not enough insight for even one level".into());
+    }
     save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }

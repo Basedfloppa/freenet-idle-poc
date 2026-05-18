@@ -4,9 +4,40 @@
 use shared::format_si;
 use yew::prelude::*;
 
-use crate::app::core::{Core, ONBOARDING_STEPS};
+use crate::app::core::{Core, PendingConfirm, ONBOARDING_STEPS};
 use crate::app::i18n::{Locale, MessageId};
 use crate::app::types::{Toast, TOAST_TTL_MS};
+
+/// Custom confirm modal (§8.A8) — replaces the browser-native
+/// `window.confirm()` prompt. Renders only when
+/// `Core.pending_confirm.is_some()`. Confirms enable the
+/// dispatcher in `render.rs` to fire the underlying action
+/// (disband / reset / form-change / sell-all / ascend / reveal
+/// seed). Cancels clear the pending state without dispatching.
+pub fn render_confirm_modal(
+    locale: Locale,
+    pending: &Option<PendingConfirm>,
+    on_ok: Callback<MouseEvent>,
+    on_cancel: Callback<MouseEvent>,
+) -> Html {
+    let Some(p) = pending else { return html! {} };
+    html! {
+        <div class="onboarding-backdrop">
+            <div class="onboarding-modal confirm-modal">
+                <h2>{ locale.tr_key("confirm.title") }</h2>
+                <p>{ &p.message }</p>
+                <div class="action-row onboarding-actions">
+                    <button class="primary" onclick={on_ok}>
+                        { locale.tr_key("confirm.ok") }
+                    </button>
+                    <button onclick={on_cancel}>
+                        { locale.tr_key("confirm.cancel") }
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+}
 
 /// Toast stack — fixed-position corner banners for transient
 /// notifications (achievement unlocks today; ending unlocks /
@@ -353,5 +384,37 @@ pub fn render_debug_overlay(c: &Core, now: u64) -> Html {
                 </tbody>
             </table>
         </details>
+    }
+}
+
+/// Catchup-in-progress modal. Shown while
+/// `Core::catchup_progress` is `Some`. The polling loop fires
+/// back-to-back `LoadInventory` calls during this window so each
+/// chunk completes a 24h slice of offline simulation; the modal
+/// just surfaces the progress bar and blocks interaction so the
+/// player can't trigger a mutation mid-catchup.
+pub fn render_catchup_progress_modal(c: &Core, locale: Locale) -> Html {
+    let Some(p) = c.catchup_progress else {
+        return html! {};
+    };
+    // Progress = 1 - current/start (clamped to [0, 1]).
+    let pct = if p.start_gap_ms == 0 {
+        100u8
+    } else {
+        let ratio = (p.start_gap_ms.saturating_sub(p.current_gap_ms) * 100) / p.start_gap_ms;
+        ratio.min(100) as u8
+    };
+    let hint = locale
+        .tr_key("catchup.progress_hint")
+        .replace("{cap}", &p.cap_hours.to_string());
+    html! {
+        <div class="onboarding-modal catchup-progress" role="dialog" aria-modal="true">
+            <h2>{ locale.tr_key("catchup.progress_title") }</h2>
+            <p class="muted small">{ hint }</p>
+            <div class="progress-bar">
+                <div class="progress-fill" style={format!("width: {pct}%;")}></div>
+            </div>
+            <p class="muted small">{ format!("{pct}%") }</p>
+        </div>
     }
 }

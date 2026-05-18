@@ -51,9 +51,15 @@ pub fn publish_presence(
     let area = truncate_bytes_at(area, MAX_AREA_BYTES);
     let area_id = inv.current_area;
     let champion = inv.tokens.owns(shared::TokenPerk::ChampionBadge);
-    let payload = PresencePayload::new(
+    // §E-tier: pick up the player's public cosmetic prefs from
+    // their persisted routine state. Empty motto / 0 accent /
+    // 0 frame are the "don't publish" sentinels.
+    let motto = inv.routine.public_motto.clone();
+    let accent = inv.routine.public_accent;
+    let frame = inv.routine.public_frame;
+    let payload = PresencePayload::new_with_cosmetics(
         pubkey, name, inv.gold, inv.boss_damage, area, now_ms,
-        area_id, champion,
+        area_id, champion, motto, accent, frame,
     );
     let bytes = bincode::serialize(&payload).map_err(|e| format!("ser payload: {e}"))?;
     let signature: ed25519_dalek::Signature = sk.sign(&bytes);

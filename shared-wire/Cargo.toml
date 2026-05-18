@@ -1,0 +1,28 @@
+[package]
+name = "idle-shared-wire"
+version = "0.2.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+# Wire-only types: PresencePayload + ContractState (presence-contract),
+# MailboxDelta/State (mailbox-contract), GuildsDelta/State (guilds-
+# contract), the delegate envelope, secret-store ids, byte_array
+# serde helpers. NO game semantics — these are the bytes-on-the-wire
+# that talk to freenet-core.
+#
+# Split out from `idle-shared` so the 3 contracts (which only use
+# wire types) don't get rebuilt every time the game-logic side
+# changes. Without this split, editing an enemy's XP reward would
+# bump the contracts' `code_hash` and wipe their on-network state
+# (leaderboard, mailbox, guilds aggregate).
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
+bincode = "1.3"
+ed25519-dalek = { version = "2", default-features = false, features = ["alloc", "zeroize"] }
+# sha2 is used by `guild_id_from_name` — pure-Rust SHA-256 works in
+# the WASM contract sandbox without needing host crypto syscalls.
+sha2 = { version = "0.10", default-features = false }
+
+[workspace]

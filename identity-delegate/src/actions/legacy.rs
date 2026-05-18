@@ -43,22 +43,41 @@ pub fn buy_legacy_node(
     node_id: u8,
     now_ms: u64,
 ) -> Result<Inventory, String> {
+    buy_legacy_node_n(ctx, node_id, 1, now_ms)
+}
+
+/// Buy `count` levels of a Legacy node atomically. `count == 0` is
+/// "buy as many as stars allow", capped at 100 to keep the spend
+/// loop bounded. Refuses partial purchases — either we can afford
+/// the whole batch or the RPC fails. Per-level cost recomputed at
+/// each step because some nodes have a non-flat curve.
+pub fn buy_legacy_node_n(
+    ctx: &mut DelegateCtx,
+    node_id: u8,
+    count: u32,
+    now_ms: u64,
+) -> Result<Inventory, String> {
     let mut inv = load_inventory_raw(ctx);
     enter_action(&mut inv, now_ms)?;
     let node = LegacyNode::from_id(node_id)
         .ok_or_else(|| format!("unknown legacy node {node_id}"))?;
     award_pending_stars(&mut inv);
-    let current_level = inv.legacy.node_level(node);
-    let cost = node.next_cost(current_level);
-    if inv.legacy.stars < cost {
-        return Err(format!(
-            "not enough stars: need {cost}, have {}",
-            inv.legacy.stars
-        ));
+    let cap: u32 = if count == 0 { 100 } else { count.min(100) };
+    let mut bought = 0u32;
+    while bought < cap {
+        let current_level = inv.legacy.node_level(node);
+        let cost = node.next_cost(current_level);
+        if inv.legacy.stars < cost {
+            break;
+        }
+        inv.legacy.stars -= cost;
+        let entry = inv.legacy.nodes.entry(node.id()).or_insert(0);
+        *entry = entry.saturating_add(1);
+        bought += 1;
     }
-    inv.legacy.stars -= cost;
-    let entry = inv.legacy.nodes.entry(node.id()).or_insert(0);
-    *entry = entry.saturating_add(1);
+    if bought == 0 {
+        return Err("not enough stars for even one level".into());
+    }
     save_inventory(ctx, &mut inv)?;
     Ok(inv)
 }
@@ -70,6 +89,9 @@ pub fn buy_legacy_node(
 /// existing `last_awarded_level` watermark and only awards stars
 /// for crossing levels above the pre-ascend high-water mark.
 pub fn ascend(ctx: &mut DelegateCtx, now_ms: u64) -> Result<Inventory, String> {
+    // Explicit reset boundary — see `shared::ResetScope::Ascend` for
+    // exactly which fields the soft-reset clears vs preserves.
+    let _scope = shared::ResetScope::Ascend;
     let mut inv = load_inventory_raw(ctx);
     enter_action(&mut inv, now_ms)?;
     // One final pending-star award against the pre-reset state so

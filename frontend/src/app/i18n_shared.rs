@@ -186,6 +186,15 @@ pub fn slot_name(locale: Locale, idx: usize) -> &'static str {
     }
 }
 
+/// Localized name for an `ActivityDef`. Falls back to the
+/// hard-coded English `name` from the activities table when no
+/// `activity_name.<id>` key exists.
+pub fn activity_name(locale: Locale, activity: &shared::ActivityDef) -> &'static str {
+    let key = format!("activity_name.{}", activity.id);
+    let v = i18n_loader::tr(locale.as_str(), &key);
+    if v.starts_with('?') { activity.name } else { v }
+}
+
 pub fn tier_prefix(locale: Locale, tier: u8) -> &'static str {
     let key = format!("tier_prefix.{tier}");
     let v = i18n_loader::tr(locale.as_str(), &key);

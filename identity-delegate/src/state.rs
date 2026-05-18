@@ -62,8 +62,12 @@ pub fn load_inventory_raw(ctx: &mut DelegateCtx) -> Inventory {
         return wire.into_latest();
     }
     if let Ok(inv_v9) = bincode::deserialize::<InventoryV9>(&bytes) {
-        return shared::InventoryV15::from(shared::InventoryV14::from(shared::InventoryV13::from(
-            shared::InventoryV12::from(shared::InventoryV11::from(InventoryV10::from(inv_v9))),
+        return shared::InventoryV20::from(shared::InventoryV19::from(shared::InventoryV18::from(
+            shared::InventoryV17::from(shared::InventoryV16::from(shared::InventoryV15::from(
+                shared::InventoryV14::from(shared::InventoryV13::from(shared::InventoryV12::from(
+                    shared::InventoryV11::from(InventoryV10::from(inv_v9)),
+                ))),
+            ))),
         )));
     }
     Inventory::default()
@@ -223,6 +227,20 @@ pub fn apply_hp_regen(inv: &mut Inventory, now_ms: u64) {
         .saturating_mul(elapsed)
         .checked_div(shared::HP_FULL_REGEN_MS)
         .unwrap_or(0);
+    if regen == 0 {
+        // Sub-HP fractional tick — keep the anchor where it was so
+        // the next call sees a longer elapsed and eventually crosses
+        // the 1-HP threshold. Critical for catch-up at low max_hp
+        // (cap < 60) where each fixed 1-s tick rounds to 0 and the
+        // bar would never refill if we advanced the anchor.
+        return;
+    }
     inv.current_hp = (inv.current_hp.saturating_add(regen)).min(cap);
-    inv.last_hp_tick_ms = now_ms;
+    // Advance the anchor by exactly the ms we consumed for `regen`
+    // whole HP; the remainder carries to the next call.
+    let consumed = regen
+        .saturating_mul(shared::HP_FULL_REGEN_MS)
+        .checked_div(cap)
+        .unwrap_or(0);
+    inv.last_hp_tick_ms = inv.last_hp_tick_ms.saturating_add(consumed);
 }

@@ -1,0 +1,19 @@
+{
+  "_meta": {
+    "endonym": "Forest",
+    "code": "forest",
+    "scheme": "light"
+  },
+  "vars": {
+    "--bg-page": "#ece8d8",
+    "--fg-strong": "#1a2418",
+    "--accent-primary": "#b04820",
+    "--accent-win": "#2a7a2a",
+    "--accent-loss": "#8a3818",
+    "--accent-info": "#3a6aa0",
+    "--accent-magic": "#5a4a8a",
+    "--accent-gold": "#7a5a18",
+    "--accent-earth": "#8a6a3a",
+    "--accent-grass": "#4a8a3a"
+  }
+}

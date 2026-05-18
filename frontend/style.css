@@ -202,37 +202,12 @@
     );
 }
 
-/* The Parchment block is intentionally empty — `:root` defaults
-   above ARE the Parchment palette. Kept as a named anchor so the
-   theme picker's `data-theme="parchment"` attribute has somewhere
-   to land in stylesheet diffs / DevTools. */
-[data-theme="parchment"] {}
-
-[data-theme="dusk"] {
-    --bg-page:         #15171e;
-    --fg-strong:       #f0e8d8;
-    --accent-primary:  #e0623a;
-    --accent-win:      #6abc52;
-    --accent-loss:     #d05a45;
-    --accent-info:     #6a9adc;
-    --accent-magic:    #9080d8;
-    --accent-gold:     #d4a83a;
-    --accent-earth:    #8a7a4a;
-    --accent-grass:    #6abc52;
-}
-
-[data-theme="forest"] {
-    --bg-page:         #ece8d8;
-    --fg-strong:       #1a2418;
-    --accent-primary:  #b04820;
-    --accent-win:      #2a7a2a;
-    --accent-loss:     #8a3818;
-    --accent-info:     #3a6aa0;
-    --accent-magic:    #5a4a8a;
-    --accent-gold:     #7a5a18;
-    --accent-earth:    #8a6a3a;
-    --accent-grass:    #4a8a3a;
-}
+/* Theme palettes are no longer hardcoded here. Each
+   `frontend/themes/<id>.json` defines the base palette; the
+   `theme_loader` module injects them into `<style
+   id="dynamic-theme">` at boot / on theme switch. The `:root`
+   block above stays as the Parchment fallback for the brief
+   pre-WASM window before the dynamic stylesheet lands. */
 
 
 /* ============================================================
@@ -246,6 +221,10 @@ body {
     padding: 0 1em;
     color: var(--fg-strong);
     background: var(--bg-page);
+    /* §8.A2 font-size scale. `--font-scale` is injected by
+       `prefs::apply_font_scale` into `<style id="dynamic-font-scale">`;
+       fallback `100%` keeps the legacy 16-px size. */
+    font-size: calc(16px * var(--font-scale, 100%) / 100%);
 }
 
 h1 { font-size: 1.4em; margin: 0; }
@@ -410,6 +389,11 @@ h3 { font-size: 0.82em; color: var(--fg-muted); margin: 1em 0 0.4em; text-transf
     gap: 1.4em;
     padding: 0.6em 0.4em 0.4em;
     overflow-x: auto;
+    /* Keep the graph inside its enclosing panel — without max-width
+       the inner flex content extended past `.panel`'s padding box
+       and the dashed connector lines leaked into the next section. */
+    max-width: 100%;
+    box-sizing: border-box;
 }
 .area-graph .graph-row {
     display: flex;
@@ -428,38 +412,36 @@ h3 { font-size: 0.82em; color: var(--fg-muted); margin: 1em 0 0.4em; text-transf
     max-width: 220px;
     flex: 0 1 200px;
 }
-/* Vertical connector stub above each non-starter card, drawn as a
-   pseudo-element so the markup stays clean. Cards on row 0 (no
-   predecessors) skip it via the `.starter` class. */
-.area-graph .graph-node.has-parent::before {
-    content: "";
-    position: absolute;
-    top: -1em;
-    left: 50%;
-    width: 1px;
-    height: 1em;
-    background: var(--border-soft);
+/* SVG-overlay edge renderer (§2.1). `<GraphEdgeOverlay>` measures
+   every `.graph-node[data-area-id]` after Yew lays the cards out,
+   then injects `<line>` elements connecting parent-bottom-center
+   to child-top-center. Pointer events disabled so card clicks pass
+   through. Width/height auto-stretch via `viewBox preserveAspect=
+   "none"` so the SVG follows reflow. */
+.area-graph {
+    position: relative;
 }
-.area-graph .graph-node.has-parent::after {
-    content: "";
+.area-graph .graph-edges {
     position: absolute;
-    top: -1.05em;
-    left: calc(50% - 4px);
-    width: 8px;
-    height: 8px;
-    border-right: 1px solid var(--border-soft);
-    border-bottom: 1px solid var(--border-soft);
-    transform: rotate(45deg);
-    background: var(--bg-panel);
+    top: 0;
+    left: 0;
+    /* width/height set inline by GraphEdgeOverlay so the SVG
+       extends across the FULL scroll-content of `.area-graph`,
+       not just the visible viewport — required for the
+       horizontally-overflowing wilds layout. */
+    pointer-events: none;
+    z-index: 0;
 }
-/* Tiny "↑ Predecessor" label under the connector. Same colour as
-   `.muted small` body text. */
-.area-graph .graph-edge-hint {
-    margin: 0.15em 0 0.25em;
-    font-size: 0.74em;
-    color: var(--fg-muted);
-    text-align: center;
-    font-style: italic;
+.area-graph .graph-edges line {
+    stroke: var(--border-soft);
+    stroke-width: 1.5;
+    stroke-dasharray: 4 3;
+}
+.area-graph .graph-node {
+    /* Ensure cards render above the SVG layer so the dashed lines
+       look like they're behind the cards, not over their content. */
+    position: relative;
+    z-index: 1;
 }
 @media (max-width: 720px) {
     .area-graph .graph-node {
@@ -480,8 +462,27 @@ h3 { font-size: 0.82em; color: var(--fg-muted); margin: 1em 0 0.4em; text-transf
     cursor: pointer;
     font: inherit;
     color: var(--fg-base);
-    min-height: 70px;
+    /* Lock both width and height so every card in a row has the
+       same silhouette — without this, Wilds names of varying
+       length give variable-height cards in the same row, and the
+       SVG connector lines (which anchor to per-card top/bottom)
+       look "detached" because the y-coordinates differ across
+       siblings. `width: 100%` of the flex parent's allotted
+       `flex: 0 1 200px`. */
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 140px;
     transition: background 0.15s ease, border-color 0.15s ease;
+}
+.area-card .area-blurb {
+    /* Cap the blurb at 2 lines so a long procedurally-generated
+       Wilds name doesn't push the card taller. Falls back to
+       browser-default `text-overflow: ellipsis` when the line
+       count exceeds the cap. */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
 }
 .area-card.unlocked:hover {
     background: var(--bg-elevated);
@@ -558,17 +559,28 @@ h3 { font-size: 0.82em; color: var(--fg-muted); margin: 1em 0 0.4em; text-transf
 }
 .area-rewards {
     display: flex;
-    gap: 0.4em;
+    flex-wrap: wrap;
+    gap: 0.3em;
     margin-top: auto;
     font-variant-numeric: tabular-nums;
     font-size: 0.78em;
     color: var(--fg-soft);
+    /* Don't let the localized "зачищено N" badge or other wider
+       strings push siblings outside the .area-card's max-width.
+       Min-width: 0 on flex items lets them shrink properly. */
+    min-width: 0;
 }
 .area-rewards > span {
     background: var(--bg-elevated);
     border: 1px solid var(--border-soft);
     border-radius: 3px;
     padding: 1px 6px;
+    /* Long labels (esp. Russian "зачищено N") get cropped at the
+       card edge rather than blowing the row width. */
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* Three-column grid: stats | combat scene | equipment.
@@ -1109,6 +1121,27 @@ table.debug-grid td {
 }
 .onboarding-modal.catchup-modal ul.catchup-estate { margin: 0.3em 0 0; }
 
+/* Catchup-in-progress modal. Reuses the .onboarding-modal chrome
+   for visual consistency; adds a horizontal progress bar driven
+   inline-style width as chunks complete. No dismiss button —
+   the modal vanishes automatically when the current offline gap
+   drops below CATCHUP_DONE_GAP_MS (5s). */
+.onboarding-modal.catchup-progress { max-width: 480px; text-align: center; }
+.onboarding-modal.catchup-progress .progress-bar {
+    width: 100%;
+    height: 12px;
+    background: var(--bg-recessed, #1d2020);
+    border: 1px solid var(--border, #444);
+    border-radius: 6px;
+    overflow: hidden;
+    margin: 0.6em 0;
+}
+.onboarding-modal.catchup-progress .progress-fill {
+    height: 100%;
+    background: var(--accent-primary, #4a90d8);
+    transition: width 0.4s ease-out;
+}
+
 /* Transient unlock toasts — stacked in the top-right corner.
    Pointer-events: none so they never intercept clicks on the
    underlying UI; auto-fade is handled in Rust (unified tick
@@ -1620,9 +1653,11 @@ table.buy-grid tr.disabled-row button { cursor: not-allowed; }
    shrinks naturally. */
 .shop-item .shop-item-actions {
     display: flex;
-    flex-direction: column;
-    gap: 0.2em;
-    align-items: stretch;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.3em;
+    align-items: center;
+    justify-content: flex-end;
 }
 
 /* World Boss bar. */
@@ -1747,4 +1782,215 @@ table.inventory td.num {
 }
 *::-webkit-scrollbar-corner {
     background: transparent;
+}
+
+/* ----- §8 Tier C/D customization hooks ----- */
+
+/* D2 reduced-motion: kill slide-in / fade transitions when the
+   user opts in. Respect the OS-level preference too — if the user
+   has the system flag on AND the pref off, we still honour the
+   system flag (less surprising than overriding it). */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.001s !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001s !important;
+    }
+}
+:root[data-reduced-motion="true"] *,
+:root[data-reduced-motion="true"] *::before,
+:root[data-reduced-motion="true"] *::after {
+    animation-duration: 0.001s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001s !important;
+}
+
+/* D3 reduced-flash: kill glow/pulse effects (Champion badge,
+   ascend flash, era-advance) without killing slide transitions. */
+:root[data-reduced-flash="true"] .champion-badge {
+    filter: none !important;
+    text-shadow: none !important;
+    animation: none !important;
+}
+:root[data-reduced-flash="true"] .reveal-anim,
+:root[data-reduced-flash="true"] .era-advance,
+:root[data-reduced-flash="true"] .ascend-flash {
+    animation: none !important;
+}
+
+/* B4 stash density variants. */
+:root[data-stash-density="compact"] .stash-item {
+    padding: 0.2rem 0.4rem;
+    font-size: 0.92em;
+}
+:root[data-stash-density="tight"] .stash-item {
+    padding: 0.1rem 0.3rem;
+    font-size: 0.85em;
+    line-height: 1.15;
+}
+:root[data-stash-density="tight"] .stash-group {
+    margin-bottom: 0.4rem;
+}
+
+/* C6 motto under hero name. */
+.hero-motto {
+    margin: 0.25rem 0 0.4rem 0;
+    font-style: italic;
+    opacity: 0.8;
+}
+
+/* B1 stash toolbar. */
+.stash-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    align-items: center;
+    margin-bottom: 0.6rem;
+    padding: 0.4rem;
+    background: var(--bg-card, rgba(0,0,0,0.04));
+    border-radius: 0.3rem;
+}
+.stash-toolbar button {
+    padding: 0.2rem 0.5rem;
+    font-size: 0.9em;
+}
+
+/* C7 row_accent presets. Body sets `--row-accent` style inline on
+   the player's own row in the leaderboard; this class consumes it. */
+.leader-row.own-accent {
+    background: linear-gradient(90deg, var(--row-accent) 0%, transparent 100%);
+}
+
+/* §8 B2 panel-collapse toggle. */
+.panel-collapse-toggle {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 0.9em;
+    padding: 0 0.3rem;
+    color: inherit;
+}
+.panel-collapse-toggle:hover {
+    background: var(--bg-card, rgba(0,0,0,0.05));
+    border-radius: 0.2rem;
+}
+.panel.collapsed h2 {
+    margin-bottom: 0;
+}
+
+/* §8 C3 OBS overlay mode. Compact layout for browser-source use. */
+:root[data-overlay-mode="true"] main {
+    max-width: 600px;
+}
+:root[data-overlay-mode="true"] .top-actions button {
+    padding: 0.2rem 0.5rem;
+    font-size: 0.85em;
+}
+:root[data-overlay-mode="true"] .top-actions {
+    gap: 0.2rem;
+}
+:root[data-overlay-mode="true"] header h1 {
+    font-size: 1.1em;
+}
+:root[data-overlay-mode="true"] .settings-advanced .debug-overlay {
+    display: none;
+}
+:root[data-overlay-mode="true"] .repo-link {
+    display: none;
+}
+
+/* §⚠️#8 Resources hierarchy divider. */
+.panel.resources .res-divider td {
+    padding-top: 0.4rem;
+    border-top: 1px solid var(--fg-muted, #bbb);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.5;
+}
+
+/* §P3 daily check-in inline row. */
+.daily-checkin {
+    margin: 0.3rem 0 0.4rem 0;
+}
+
+/* §E-tier leader-motto inline. */
+.leader-motto {
+    margin-left: 0.4em;
+    font-style: italic;
+}
+
+/* §P3 skill-up animation. `.skill-unlock-anim` class applies a
+   brief pulse + glow when a newly-unlocked skill renders. The
+   class is dropped from the DOM by the next render pass (skill
+   moves from "newly unlocked" set into the baseline). */
+@keyframes skill-unlock-pulse {
+    0% {
+        transform: scale(1);
+        box-shadow: 0 0 0 0 var(--accent-magic, #6a5aaa);
+    }
+    50% {
+        transform: scale(1.05);
+        box-shadow: 0 0 8px 4px var(--accent-magic, #6a5aaa);
+    }
+    100% {
+        transform: scale(1);
+        box-shadow: 0 0 0 0 transparent;
+    }
+}
+.skill-unlock-anim {
+    animation: skill-unlock-pulse 1.2s ease-in-out 1;
+}
+:root[data-reduced-motion="true"] .skill-unlock-anim,
+:root[data-reduced-flash="true"] .skill-unlock-anim {
+    animation: none !important;
+}
+
+/* §P3: post-claim streak line — render as flat muted text only,
+   no button-shaped element. The active claim-CTA still renders
+   as a normal button via the other branch of `render_daily_checkin`. */
+.daily-checkin-muted {
+    opacity: 0.7;
+    margin: 0.25rem 0 0.4rem 0;
+}
+
+/* §UX: Ascend block as a visually distinct section inside the
+   Legacy panel — separator line + dimmed wrapper so it reads as
+   "this is the prestige reset", not just another row of nodes. */
+.ascend-divider {
+    margin-top: 1.5em;
+    padding-top: 1em;
+    border-top: 2px dashed var(--border-soft, #ccc);
+}
+.ascend-divider h3 {
+    margin-top: 0;
+    color: var(--accent-loss, #aa3322);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.95em;
+}
+
+/* §C7 accent picker — swatches with live preview of the gradient
+   that will paint the player's own leaderboard row. The "none"
+   option falls back to dashed-outline so a player can tell apart
+   "no accent" from a missing button. */
+.accent-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35em;
+    margin: 0.4em 0 0.8em;
+}
+.accent-picker .accent-swatch {
+    width: 100px;
+    height: 28px;
+    border: 1px solid var(--border-soft);
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 0 0.4em;
+    font-size: 0.82em;
+    color: var(--fg-base);
+}
+.accent-picker .accent-swatch.active {
+    outline: 2px solid var(--accent-primary, #d24a2a);
+    outline-offset: 1px;
+    cursor: default;
 }

@@ -1,0 +1,12 @@
+[toolchain]
+# Pinned (Approach A — see docs/delegate-stability.md). A
+# stable-channel bump rotates contract WASM bytes and therefore the
+# contract `code_hash`. A fresh `code_hash` mints a NEW
+# `presence-contract` instance which orphans every player's
+# `cumulative_damage` and the live leaderboard.
+#
+# Bumping this pin is a deliberate act paired with a refreshed
+# `published-contract/presence/` snapshot and a release-notes mention.
+channel = "1.93.0"
+targets = ["wasm32-unknown-unknown"]
+components = ["rustfmt", "clippy"]

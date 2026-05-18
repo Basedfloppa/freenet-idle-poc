@@ -1,0 +1,19 @@
+{
+  "_meta": {
+    "endonym": "Dusk",
+    "code": "dusk",
+    "scheme": "dark"
+  },
+  "vars": {
+    "--bg-page": "#15171e",
+    "--fg-strong": "#f0e8d8",
+    "--accent-primary": "#e0623a",
+    "--accent-win": "#6abc52",
+    "--accent-loss": "#d05a45",
+    "--accent-info": "#6a9adc",
+    "--accent-magic": "#9080d8",
+    "--accent-gold": "#d4a83a",
+    "--accent-earth": "#8a7a4a",
+    "--accent-grass": "#6abc52"
+  }
+}

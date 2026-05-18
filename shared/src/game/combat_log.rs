@@ -35,4 +35,11 @@ pub struct EncounterLog {
 }
 
 pub const STARTING_HP: u64 = 20;
-pub const HP_FULL_REGEN_MS: u64 = 60_000;
+/// Wall-clock ms for HP to refill from 0 to max while not in a
+/// mission. Tuned 2026-05-18: halved from 60s → 30s so the death
+/// penalty doesn't dominate the AFK rhythm. The HP regen banner
+/// still surfaces the wait, and a 30s window is short enough that a
+/// player checking back in rarely loses meaningful AFK time. If a
+/// future playtest finds the death penalty trivialised, bump back
+/// toward 45–60s.
+pub const HP_FULL_REGEN_MS: u64 = 30_000;

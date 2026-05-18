@@ -558,8 +558,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 
 [[package]]
-name = "idle-shared"
-version = "0.1.0"
+name = "idle-shared-wire"
+version = "0.2.0"
 dependencies = [
  "bincode",
  "ed25519-dalek",
@@ -629,12 +629,12 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "mailbox-contract"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bincode",
  "ed25519-dalek",
  "freenet-stdlib",
- "idle-shared",
+ "idle-shared-wire",
  "rand",
  "serde",
 ]

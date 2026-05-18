@@ -85,7 +85,6 @@ impl DelegateInterface for IdentityDelegate {
             AppRequest::ForgeUpgrade { catalog_id, now_ms } => {
                 map_inv(actions::forge_upgrade(ctx, catalog_id, now_ms))
             }
-            AppRequest::WorkFarm { now_ms } => map_inv(actions::work_farm(ctx, now_ms)),
             AppRequest::SellWheat { amount, now_ms } => {
                 map_inv(actions::sell_wheat(ctx, amount, now_ms))
             }
@@ -165,6 +164,29 @@ impl DelegateInterface for IdentityDelegate {
             } => map_inv(actions::set_routine_estate_target(
                 ctx, tier_id, target, now_ms,
             )),
+            AppRequest::SetRoutineGearTarget { slot_idx, tier, now_ms } => {
+                map_inv(actions::routine::set_routine_gear_target(
+                    ctx, slot_idx, tier, now_ms,
+                ))
+            }
+            AppRequest::SetRoutineConsumableTarget { kind, target, now_ms } => {
+                map_inv(actions::routine::set_routine_consumable_target(
+                    ctx, kind, target, now_ms,
+                ))
+            }
+            AppRequest::SetRoutineAutoSkill { enabled, now_ms } => {
+                map_inv(actions::routine::set_routine_auto_skill(ctx, enabled, now_ms))
+            }
+            AppRequest::SetRoutineActivityForZone { area_id, activity_id, now_ms } => {
+                map_inv(actions::routine::set_routine_activity_for_zone(
+                    ctx, area_id, activity_id, now_ms,
+                ))
+            }
+            AppRequest::SetRoutineBattlePolicy { policy, now_ms } => {
+                map_inv(actions::routine::set_routine_battle_policy(
+                    ctx, policy, now_ms,
+                ))
+            }
             AppRequest::BuyInsightNode { node_id, now_ms } => {
                 map_inv(actions::buy_insight_node(ctx, node_id, now_ms))
             }
@@ -195,6 +217,36 @@ impl DelegateInterface for IdentityDelegate {
                 rank,
                 now_ms,
             } => map_inv(actions::claim_boss_kill(ctx, era, era_max_hp, rank, now_ms)),
+            AppRequest::ConvertEssenceToGold { amount, now_ms } => {
+                map_inv(actions::convert_essence_to_gold(ctx, amount, now_ms))
+            }
+            AppRequest::LockRoutineGearTargetsToEquipped { now_ms } => {
+                map_inv(actions::lock_routine_gear_targets_to_equipped(ctx, now_ms))
+            }
+            AppRequest::SetRoutineAutoEquipBest { enabled, now_ms } => {
+                map_inv(actions::set_routine_auto_equip_best(ctx, enabled, now_ms))
+            }
+            AppRequest::SetRoutineOfflineCapHours { hours, now_ms } => {
+                map_inv(actions::set_routine_offline_cap_hours(ctx, hours, now_ms))
+            }
+            AppRequest::SetRoutineMissionCycle { mode, areas, now_ms } => {
+                map_inv(actions::set_routine_mission_cycle(ctx, mode, areas, now_ms))
+            }
+            AppRequest::SetRoutineCombatSpeed { mult_bp, now_ms } => {
+                map_inv(actions::set_routine_combat_speed(ctx, mult_bp, now_ms))
+            }
+            AppRequest::SetPublicCosmetics { motto, accent, frame, now_ms } => {
+                map_inv(actions::set_public_cosmetics(ctx, motto, accent, frame, now_ms))
+            }
+            AppRequest::ClaimDailyCheckin { now_ms } => {
+                map_inv(actions::claim_daily_checkin(ctx, now_ms))
+            }
+            AppRequest::BuyLegacyNodeBulk { node_id, count, now_ms } => {
+                map_inv(actions::buy_legacy_node_n(ctx, node_id, count, now_ms))
+            }
+            AppRequest::BuyInsightNodeBulk { node_id, count, now_ms } => {
+                map_inv(actions::buy_insight_node_n(ctx, node_id, count, now_ms))
+            }
         };
 
         let out_envelope = DelegateEnvelopeOut {

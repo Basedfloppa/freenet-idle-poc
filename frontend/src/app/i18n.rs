@@ -445,7 +445,7 @@ pub enum MessageId {
 
     StatusAskingDelegate, StatusRegisteringDelegate, StatusSubscribing,
 
-    TabFarm, TabWorldMap, TabShop, TabGuilds, TabAchievements, TabMastery, TabSettings, TabHelp,
+    TabHome, TabWorldMap, TabShop, TabGuilds, TabAchievements, TabMastery, TabSettings, TabHelp,
 
     PillDefeated, PillAdventuring, PillFocusing, PillRecovering, PillReady, PillEstate,
 
@@ -460,7 +460,7 @@ pub enum MessageId {
     SourceLink,
 
     PanelHero, PanelEquipment, PanelConsumables, PanelResources, PanelShop,
-    PanelBuyGear, PanelSage, PanelFarm, PanelWorldMap, PanelWorldBoss,
+    PanelBuyGear, PanelSage, PanelWorldMap, PanelWorldBoss,
     PanelPlotSoFar, PanelGuilds, PanelCreateGuild, PanelTutorialWelcome,
     PanelWhileAway, PanelEndings, PanelSkillsLine, PanelFormsVisited,
     PanelAchievementsLow, PanelHowToPlay,
@@ -470,7 +470,7 @@ pub enum MessageId {
     ColSlot, ColName, ColDamage, ColArea, ColSeen,
 
     BtnRunMission, BtnAutoOn, BtnAutoOff, BtnAutoEquipBest, BtnUse, BtnBuy,
-    BtnWorkFarm, BtnSellAllWheat, BtnCreate, BtnLeaveGuild, BtnDisbandGuild,
+    BtnSellAllWheat, BtnCreate, BtnLeaveGuild, BtnDisbandGuild,
     BtnJoin, BtnEquip, BtnNext, BtnStartPlaying, BtnSkipIntro,
 
     ItemPotion, ItemFireball,
@@ -526,7 +526,7 @@ pub enum MessageId {
     MailboxNotConfiguredHead, MailboxNotConfiguredVia, MailboxNotConfiguredTail,
     MailboxNotConfiguredIn,
 
-    ShopStashDesc, ShopBuyGearDesc, ShopSageDesc, ShopFarmDesc, ShopFarmDescPassive,
+    ShopStashDesc, ShopBuyGearDesc, ShopSageDesc, ShopFarmDescPassive,
 
     TipFightInProgress, TipAutoToggleMidFight, TipAutoEquipBest, TipAutoEquipNothing,
     TipEstateBlocksCombat, TipPotionQueue, TipPotionIdle, TipFireballQueue,
@@ -543,7 +543,7 @@ impl MessageId {
             StatusAskingDelegate => "status.asking_delegate",
             StatusRegisteringDelegate => "status.registering_delegate",
             StatusSubscribing => "status.subscribing",
-            TabFarm => "tab.farm",
+            TabHome => "tab.home",
             TabWorldMap => "tab.world_map",
             TabShop => "tab.shop",
             TabGuilds => "tab.guilds",
@@ -583,7 +583,6 @@ impl MessageId {
             PanelShop => "panel.shop",
             PanelBuyGear => "panel.buy_gear",
             PanelSage => "panel.sage",
-            PanelFarm => "panel.farm",
             PanelWorldMap => "panel.world_map",
             PanelWorldBoss => "panel.world_boss",
             PanelPlotSoFar => "panel.plot_so_far",
@@ -622,7 +621,6 @@ impl MessageId {
             BtnAutoEquipBest => "btn.auto_equip_best",
             BtnUse => "btn.use",
             BtnBuy => "btn.buy",
-            BtnWorkFarm => "btn.work_farm",
             BtnSellAllWheat => "btn.sell_all_wheat",
             BtnCreate => "btn.create",
             BtnLeaveGuild => "btn.leave_guild",
@@ -770,7 +768,6 @@ impl MessageId {
             ShopStashDesc => "shop.stash_desc",
             ShopBuyGearDesc => "shop.buy_gear_desc",
             ShopSageDesc => "shop.sage_desc",
-            ShopFarmDesc => "shop.farm_desc",
             ShopFarmDescPassive => "shop.farm_desc_passive",
             TipFightInProgress => "tip.fight_in_progress",
             TipAutoToggleMidFight => "tip.auto_toggle_mid_fight",

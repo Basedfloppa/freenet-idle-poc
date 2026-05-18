@@ -26,6 +26,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # loop.
 WATCH_DIRS=(
     "$HERE/shared/src"
+    "$HERE/shared-wire/src"
     "$HERE/presence-contract/src"
     "$HERE/mailbox-contract/src"
     "$HERE/guilds-contract/src"
@@ -33,6 +34,7 @@ WATCH_DIRS=(
 )
 WATCH_FILES=(
     "$HERE/shared/Cargo.toml"
+    "$HERE/shared-wire/Cargo.toml"
     "$HERE/presence-contract/Cargo.toml"
     "$HERE/mailbox-contract/Cargo.toml"
     "$HERE/guilds-contract/Cargo.toml"

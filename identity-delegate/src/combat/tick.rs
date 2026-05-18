@@ -82,11 +82,25 @@ pub fn tick_battle(inv: &mut Inventory, now_ms: u64) -> u32 {
     // doesn't burn CPU budget burning through a year of accumulated
     // turns. Catch-up needs a separate ceiling anyway.
     const MAX_TURNS_PER_TICK: u32 = 600;
+    // Insight BattleCadence shaves up to 500 ms off the default
+    // 1000 ms cooldown. Recomputed once per tick because the
+    // node level can't change mid-battle.
+    // Apply Insight BattleCadence (negative delta) first, then
+    // §8 D6 combat-speed multiplier in basis points. `mult_bp = 0`
+    // is the legacy-default sentinel (= 10_000 = 1×). Server-side
+    // clamp at 30_000 (3×) to keep catchup tick counts bounded.
+    let base_cooldown = TURN_COOLDOWN_MS.saturating_sub(inv.insight.cadence_delta_ms());
+    let mult_bp = if inv.routine.combat_speed_bp == 0 {
+        10_000u64
+    } else {
+        (inv.routine.combat_speed_bp as u64).min(30_000)
+    };
+    let cooldown_ms = base_cooldown.saturating_mul(10_000) / mult_bp.max(1);
     while turns_resolved < MAX_TURNS_PER_TICK {
         let Some(battle) = inv.current_battle.as_ref() else { break };
         let next_turn_at = battle
             .last_turn_ms
-            .saturating_add(TURN_COOLDOWN_MS);
+            .saturating_add(cooldown_ms);
         if next_turn_at > now_ms {
             break;
         }
@@ -156,9 +170,28 @@ fn run_one_turn(inv: &mut Inventory, turn_ms: u64) -> TurnOutcome {
     let enemy_hit = raw_enemy_dmg
         .saturating_mul(100u64.saturating_sub(player_evasion.min(95)))
         / 100;
-    let player_hit = player_hit.max(1);
+    let mut player_hit = player_hit.max(1);
     let enemy_hit = enemy_hit.max(1);
     let player_first = player_speed >= enemy.speed;
+
+    // Insight CriticalStrike — deterministic per-turn roll using
+    // (chain_seed, encounter_idx, recent_turns.len()) as the
+    // entropy source. Keeps battles reproducible across replays.
+    let crit_bp = inv.insight.crit_chance_bp();
+    if crit_bp > 0 {
+        let (seed, eidx, turn_n) = inv
+            .current_battle
+            .as_ref()
+            .map(|b| (b.chain_seed, b.encounter_idx as u64, b.recent_turns.len() as u64))
+            .unwrap_or((0, 0, 0));
+        let roll = seed
+            .wrapping_mul(2862933555777941757)
+            .wrapping_add(eidx.wrapping_mul(3037000493))
+            .wrapping_add(turn_n.wrapping_mul(6364136223846793005));
+        if (roll % 10_000) < crit_bp {
+            player_hit = player_hit.saturating_mul(2);
+        }
+    }
 
     // Apply queued action and basic swings, accumulating damage
     // counters. Borrow `battle` for the duration of this turn so we
@@ -177,7 +210,36 @@ fn run_one_turn(inv: &mut Inventory, turn_ms: u64) -> TurnOutcome {
             .expect("current_battle present from caller");
         std::mem::replace(&mut battle.queued_action, BATTLE_ACTION_NONE)
     };
-    let mut applied_action = queued;
+    // Routine BattleActionPolicy: if no player-queued action, fall
+    // back to the auto-policy. Potion fires at HP-pct threshold,
+    // fireball every N turns. Skipped when policy is Manual or
+    // resources are missing.
+    let auto_action = if queued == BATTLE_ACTION_NONE {
+        match inv.routine.battle_action_policy {
+            shared::BattleActionPolicy::Manual => BATTLE_ACTION_NONE,
+            shared::BattleActionPolicy::Auto { potion_below_hp_pct, fireball_per_n_turns } => {
+                let hp_pct = if max_hp > 0 {
+                    inv.current_hp.saturating_mul(100) / max_hp
+                } else { 100 };
+                if inv.potions > 0
+                    && potion_below_hp_pct > 0
+                    && hp_pct < potion_below_hp_pct as u64
+                {
+                    BATTLE_ACTION_POTION
+                } else if inv.fireballs > 0 && fireball_per_n_turns > 0 {
+                    let turn_n = inv
+                        .current_battle
+                        .as_ref()
+                        .map(|b| b.recent_turns.len() as u32)
+                        .unwrap_or(0);
+                    if (turn_n + 1) % fireball_per_n_turns == 0 {
+                        BATTLE_ACTION_FIREBALL
+                    } else { BATTLE_ACTION_NONE }
+                } else { BATTLE_ACTION_NONE }
+            }
+        }
+    } else { BATTLE_ACTION_NONE };
+    let mut applied_action = if queued != BATTLE_ACTION_NONE { queued } else { auto_action };
     match applied_action {
         BATTLE_ACTION_POTION if inv.potions > 0 => {
             inv.potions -= 1;
@@ -321,17 +383,43 @@ fn end_encounter_win(inv: &mut Inventory, enemy_id: u16, turn_ms: u64) {
     if area.id >= shared::WILDS_AREA_BASE {
         essence_gain = essence_gain.saturating_add(area.essence_mult);
     }
+    // Insight EssenceSurge node multiplies essence first, then
+    // the token EssenceWeaver perk on top.
+    essence_gain = essence_gain.saturating_mul(inv.insight.essence_mult_bp()) / 10_000;
+    essence_gain = essence_gain.saturating_mul(inv.tokens.essence_mult_bp()) / 10_000;
     inv.essence = inv.essence.saturating_add(essence_gain);
-    let scaled_boss = MISSION_DAMAGE
-        .saturating_mul(area.damage_mult)
-        .saturating_mul(token_boss_bp)
-        / 10_000;
+    let mut boss_dmg = MISSION_DAMAGE.saturating_mul(area.damage_mult);
+    // Insight BossStriker — flat per-encounter bonus on boss-contact areas.
+    if area.damage_mult > 0 {
+        boss_dmg = boss_dmg.saturating_add(inv.insight.boss_striker_bonus());
+    }
+    let scaled_boss = boss_dmg.saturating_mul(token_boss_bp) / 10_000;
     inv.boss_damage = inv.boss_damage.saturating_add(scaled_boss);
     let scaled_xp = scale_by_area_level(enemy.xp_reward, area.min_level);
     inv.experience = inv.experience.saturating_add(scaled_xp);
 
-    if inv.mission_count % GEAR_DROP_EVERY == 0 {
-        let drop_index = inv.mission_count / GEAR_DROP_EVERY;
+    // Insight HealingTouch — top up HP after every win.
+    let heal = inv.insight.heal_per_encounter();
+    if heal > 0 {
+        let max = crate::derived::max_hp_of(inv);
+        inv.current_hp = inv.current_hp.saturating_add(heal).min(max);
+    }
+
+    // Gear drop: base cadence at GEAR_DROP_EVERY *plus* an Insight
+    // TreasureHunter roll on every encounter. The cadence path
+    // stays deterministic; the bonus roll uses (mission_count, area)
+    // as entropy so a replay reproduces the same drops.
+    let base_drop = inv.mission_count % GEAR_DROP_EVERY == 0;
+    let bonus_bp = inv.insight.treasure_bonus_bp();
+    let bonus_drop = if bonus_bp > 0 {
+        let roll = inv
+            .mission_count
+            .wrapping_mul(2862933555777941757)
+            .wrapping_add(area.id as u64);
+        (roll % 10_000) < bonus_bp
+    } else { false };
+    if base_drop || bonus_drop {
+        let drop_index = inv.mission_count / GEAR_DROP_EVERY.max(1);
         let slot = (drop_index as u16) % 8;
         let tier_bias = (area.id as u16).min(shared::TIER_COUNT as u16 - 1);
         let catalog_id = slot + tier_bias * 8;
@@ -347,6 +435,36 @@ fn end_encounter_win(inv: &mut Inventory, enemy_id: u16, turn_ms: u64) {
     // currency that compounds across the spend tree.
     if area.id >= shared::WILDS_AREA_BASE {
         inv.insight.balance = inv.insight.balance.saturating_add(1);
+
+        // Landmark first-clear reward (§2 wilds depth). Idempotent
+        // via `landmark_claims[area_id]` watermark — second clear
+        // doesn't re-award.
+        if !inv.landmark_claims.contains_key(&area.id) {
+            if let Some(landmark) = shared::wilds_landmark(area.id) {
+                match landmark {
+                    shared::WildsLandmark::EssencePool(n) => {
+                        inv.essence = inv.essence.saturating_add(n);
+                    }
+                    shared::WildsLandmark::GearCache(tier) => {
+                        if let Some(cid) = shared::shop_roll_catalog_id(0, tier, 0) {
+                            if shared::gear_template(cid).is_some() {
+                                inv.unequipped.push(cid);
+                            }
+                        }
+                    }
+                    shared::WildsLandmark::HiddenFormScroll(form_id) => {
+                        inv.forms_visited.entry(form_id).or_insert(turn_ms);
+                    }
+                    shared::WildsLandmark::TokenBag(n) => {
+                        inv.tokens.balance = inv.tokens.balance.saturating_add(n);
+                    }
+                    shared::WildsLandmark::InsightTrove(n) => {
+                        inv.insight.balance = inv.insight.balance.saturating_add(n);
+                    }
+                }
+                inv.landmark_claims.insert(area.id, turn_ms);
+            }
+        }
     }
     if inv.mission_count % FIREBALL_DROP_EVERY == 0 {
         inv.fireballs = inv.fireballs.saturating_add(1);
@@ -403,6 +521,23 @@ fn advance_to_next_encounter(inv: &mut Inventory, turn_ms: u64) {
     battle.encounter_idx = battle.encounter_idx.saturating_add(1);
     if battle.encounter_idx >= ENCOUNTERS_PER_MISSION as u8 {
         inv.current_battle = None;
+        // §8 B7: auto-mission area cycle. Walk the configured
+        // list (or stay put on Static / empty config). Boss-first
+        // currently degrades to Cycle — the picker prefers
+        // boss-eligible areas at config time, not runtime.
+        if inv.routine.mission_cycle_mode != shared::MISSION_CYCLE_STATIC
+            && !inv.routine.mission_cycle_areas.is_empty()
+        {
+            let next_idx = (inv.routine.mission_cycle_idx as usize + 1)
+                % inv.routine.mission_cycle_areas.len();
+            let next_area = inv.routine.mission_cycle_areas[next_idx];
+            inv.routine.mission_cycle_idx = next_idx as u8;
+            // Skip level-gate check here — the player explicitly
+            // configured this list, presumably with reachable
+            // areas. If they messed up, the next start_battle
+            // falls back to whatever the roster gives.
+            inv.current_area = next_area;
+        }
         return;
     }
     let roster = enemy_roster_for_area(area_id);

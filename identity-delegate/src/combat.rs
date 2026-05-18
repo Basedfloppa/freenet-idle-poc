@@ -65,16 +65,14 @@ pub fn run_mission(
 ) -> Result<Inventory, String> {
     let mut inv = load_inventory_raw(ctx);
     enter_action(&mut inv, now_ms)?;
-    // Single-active-action rule (§5.6): Estate locks out combat.
-    // Player has to explicitly toggle Estate off (or click Run
-    // Mission via the disabled-button path that won't fire the
-    // RPC anyway) before they can fight. Keeping the gate
-    // server-side means a desync'd frontend can't bypass it.
-    if inv.idle_action == shared::IDLE_ACTION_ESTATE {
-        return Err(
-            "Estate is the active idle action — stop it from the Estate panel to run missions.".into(),
-        );
-    }
+    // §⚠️#2 (2026-05-18): Estate yield is no longer gated by the
+    // §5.6 idle-action mutex — every player gets parallel Estate +
+    // combat, not just WorkforceBoss owners. The block below is
+    // retained as a historical comment; the `IDLE_ACTION_ESTATE`
+    // mutex would only return here for some FUTURE state that
+    // genuinely conflicts with combat, which today doesn't exist
+    // (the Estate accrual is purely server-side and doesn't compete
+    // for the combat tick).
     if inv.idle_action == shared::IDLE_ACTION_ACTIVITY {
         return Err(
             "An activity is running — stop it from the area panel to run missions.".into(),

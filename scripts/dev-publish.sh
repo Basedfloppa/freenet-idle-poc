@@ -82,6 +82,25 @@ build_and_publish_contract() {
     local crate="$1" artefact="$2" state_file="$3" label="$4"
     local out_hash_var="$5" out_id_var="$6"
 
+    # Lockfile-isolation byte-equality gate (Approach A — see
+    # docs/delegate-stability.md). Same warning-not-blocker contract
+    # as for the delegate: dev loop still publishes on drift so the
+    # inner cycle isn't blocked. Skip the check when the contract name
+    # doesn't map onto our published-contract/ snapshot dirs.
+    case "$crate" in
+        presence-contract|mailbox-contract|guilds-contract)
+            local short="${crate%-contract}"
+            echo "[dev-publish] checking $short byte-equality against published-contract/"
+            if ! "$HERE/scripts/check-contract-byte-equal.sh" "$short"; then
+                echo "[dev-publish] WARNING: $label WASM drifted from committed snapshot."
+                echo "[dev-publish]          contract_id will rotate; whatever state lived"
+                echo "[dev-publish]          on the previous instance is orphaned."
+                echo "[dev-publish]          See published-contract/README.md."
+                echo "[dev-publish]          Continuing dev publish anyway."
+            fi
+            ;;
+    esac
+
     echo "[dev-publish] building $label"
     cd "$HERE/$crate"
 
@@ -125,7 +144,23 @@ build_and_publish_contract \
 ###############################################################################
 # identity-delegate has no initial state — `fdev publish delegate`
 # emits a `key:` line rather than `Publishing contract …`.
+#
+# Before building, run the lockfile-isolation byte-equality gate
+# (Approach A — see docs/delegate-stability.md). On dev this is a
+# WARNING — we still publish on drift so the inner dev loop isn't
+# blocked — but the warning is loud so accidental rotation surfaces
+# immediately. CI / prod publish should treat the same script as
+# a hard gate.
 ###############################################################################
+echo "[dev-publish] checking delegate byte-equality against published-delegate/"
+if ! "$HERE/scripts/check-delegate-byte-equal.sh"; then
+    echo "[dev-publish] WARNING: delegate WASM drifted from committed snapshot."
+    echo "[dev-publish]          code_hash will rotate; every player's inventory"
+    echo "[dev-publish]          under the old hash becomes unreachable."
+    echo "[dev-publish]          See published-delegate/README.md."
+    echo "[dev-publish]          Continuing dev publish anyway."
+fi
+
 echo "[dev-publish] building identity-delegate"
 cd "$HERE/identity-delegate"
 

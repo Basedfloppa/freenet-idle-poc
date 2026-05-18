@@ -89,8 +89,12 @@ impl MailboxEntry {
     }
 }
 
+/// V1 of the mailbox contract state. Same wrapper-chain pattern as
+/// [`crate::presence::ContractStateV1`] — additive bumps land as
+/// `MailboxStateV2 { base: V1, new_field }`. Public alias
+/// `MailboxState` tracks the latest.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct MailboxState {
+pub struct MailboxStateV1 {
     pub version: u8,
     /// Flat log — order isn't meaningful since each entry has its
     /// own timestamp. Per-recipient filtering is a recipient-side
@@ -98,7 +102,10 @@ pub struct MailboxState {
     pub entries: Vec<MailboxEntry>,
 }
 
-impl Default for MailboxState {
+/// Latest `MailboxState`. Bump this alias when a new version lands.
+pub type MailboxState = MailboxStateV1;
+
+impl Default for MailboxStateV1 {
     fn default() -> Self {
         Self {
             version: MAILBOX_STATE_VERSION,
@@ -107,7 +114,7 @@ impl Default for MailboxState {
     }
 }
 
-impl MailboxState {
+impl MailboxStateV1 {
     /// Append one entry if it verifies and is within size/timestamp
     /// bounds. Returns true if accepted. Duplicate-detection is by
     /// `(from, to, timestamp_ms)` — the sender's monotonic clock is
